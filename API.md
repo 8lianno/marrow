@@ -404,7 +404,7 @@ config = load_config(
 # Inspect
 config.cost.max_per_book          # 6.0
 config.models.synthesis           # "claude-sonnet-4-6"
-config.export.vault_path          # PosixPath("/Users/ali/Obsidian/Brain") or None
+config.export.vault_path          # PosixPath("~/Obsidian/Brain") or None
 
 # All Pydantic models — full type checking
 ```
