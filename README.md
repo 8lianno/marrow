@@ -137,22 +137,6 @@ where quality matters most.
 - [REPOS.md](REPOS.md) — upstream open-source inventory
 - [CLAUDE.md](CLAUDE.md) — per-session dev guide for Claude Code / Codex
 
-## What's inside
-
-| Category | Lines |
-|---|---:|
-| Source (`src/marrow/`) | 5,102 |
-| Tests (`tests/`) | 3,023 |
-| Prompts (Jinja, `src/marrow/prompts/`) | 254 |
-| Configs (YAML, `configs/`) | 139 |
-| Claude Code skill (`skills/claude-code/marrow/`) | 119 |
-| Docs (top-level `*.md`) | 3,982 |
-
-Eight Pydantic-validated stages, five LLM providers (Ollama, Anthropic,
-Gemini, OpenRouter, host-mode), one mandatory `marrow.llm.call()` wrapper
-that handles cost ledger + retry + schema validation + budget enforcement
-in both modes.
-
 ## Status
 
 All eight stages real end-to-end. 61 fast tests passing. Host Mode
