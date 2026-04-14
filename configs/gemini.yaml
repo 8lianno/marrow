@@ -1,0 +1,25 @@
+# Gemini preset: Gemini Flash for claims/graph (cheap), Gemini Pro for synthesis.
+# Requires: GEMINI_API_KEY env var.
+extends: default.yaml
+
+models:
+  claim_extraction:
+    provider: gemini
+    model_id: gemini-2.5-flash
+    api_key_env: GEMINI_API_KEY
+  graph_extraction:
+    provider: gemini
+    model_id: gemini-2.5-flash
+    api_key_env: GEMINI_API_KEY
+  synthesis:
+    provider: gemini
+    model_id: gemini-2.5-pro
+    api_key_env: GEMINI_API_KEY
+  validation:
+    provider: gemini
+    model_id: gemini-2.5-pro
+    api_key_env: GEMINI_API_KEY
+  quiz_generation:
+    provider: gemini
+    model_id: gemini-2.5-flash
+    api_key_env: GEMINI_API_KEY

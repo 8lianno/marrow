@@ -1,0 +1,68 @@
+# Marrow default configuration. CLI flags > env vars (MARROW_*) > this file > built-in defaults.
+mode: host  # host | api
+
+ingest:
+  parser: docling
+  parser_mode: auto
+
+chunk:
+  embedding_model: jinaai/jina-embeddings-v2-base-en
+  window_tokens: 512
+  overlap_pct: 0.25
+
+graph:
+  community_top_k: 512
+
+claims:
+  dedup_threshold: 0.92
+
+synthesize:
+  target_pages: 50
+  page_tolerance: 5
+
+validate:
+  max_iterations: 3
+  pass_rate_threshold: 0.90
+
+evaluate:
+  hamlet_leaf_threshold: 0.92
+  booookscore_threshold: 0.70
+  factscore_threshold: 0.80
+
+export:
+  vault: null  # falls back to runs/<slug>/06b_export/
+
+cost:
+  max_per_book: 4.00
+
+models:
+  claim_extraction:
+    provider: ollama
+    model_id: qwen3:14b
+    api_base: http://localhost:11434
+  graph_extraction:
+    provider: ollama
+    model_id: qwen3:14b
+    api_base: http://localhost:11434
+  synthesis:
+    provider: ollama
+    model_id: qwen3:14b
+    api_base: http://localhost:11434
+  validation:
+    provider: ollama
+    model_id: qwen3:14b
+    api_base: http://localhost:11434
+  quiz_generation:
+    provider: ollama
+    model_id: qwen3:14b
+    api_base: http://localhost:11434
+
+host:
+  task_dir: host_tasks
+  result_dir: host_results
+  poll_interval_seconds: 1.0
+  task_max_input_tokens: 8000
+  task_max_output_tokens: 4000
+
+logging:
+  level: INFO

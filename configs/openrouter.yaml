@@ -1,0 +1,13 @@
+# Cloud preset: OpenRouter for claims/graph, Anthropic direct for synthesis/validation.
+# Requires: OPENROUTER_API_KEY env var.
+extends: default.yaml
+
+models:
+  claim_extraction:
+    provider: openrouter
+    model_id: meta-llama/llama-3.1-8b-instruct
+    api_key_env: OPENROUTER_API_KEY
+  graph_extraction:
+    provider: openrouter
+    model_id: meta-llama/llama-3.1-8b-instruct
+    api_key_env: OPENROUTER_API_KEY

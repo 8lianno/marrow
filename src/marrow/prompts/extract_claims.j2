@@ -1,0 +1,34 @@
+You extract atomic claims from non-fiction text. An atomic claim is one self-contained assertion that can be verified against a source — no compound claims, no pronouns without antecedents, no interpretations beyond what the text states.
+
+Rules:
+1. Each claim MUST be a single, standalone sentence. Rewrite pronouns to their antecedents ("it" → the actual noun from context).
+2. Each claim MUST be grounded in a verbatim span from the source. `source_span` is the exact substring of the source that supports the claim (you may shorten with ellipsis, but the quoted portion must be verbatim).
+3. Classify each claim into one type:
+   - `factual`: an empirical or historical assertion about the world
+   - `definitional`: defines a term or concept
+   - `argumentative`: expresses the author's stance, recommendation, or judgment
+   - `causal`: asserts that X causes / leads to / produces Y
+   - `statistical`: asserts a quantity, rate, or distribution
+4. Do not invent claims not present in the source. If the chunk contains no substantive claim (e.g. only transitional prose), return an empty list.
+5. Do not merge multiple claims into one. Split compound sentences.
+6. Target 3-12 claims per chunk for substantive text. Short chunks (<200 words) may yield fewer.
+
+CHAPTER PATH: {{ chapter_path | join(" > ") }}
+CHUNK UUID: {{ chunk_uuid }}
+
+SOURCE CHUNK:
+---
+{{ chunk_text }}
+---
+
+Return a JSON object matching this schema:
+{
+  "claims": [
+    {
+      "claim_text": "<standalone sentence>",
+      "claim_type": "factual|definitional|argumentative|causal|statistical",
+      "source_span": "<verbatim substring of the chunk>",
+      "confidence": <float 0.0-1.0>
+    }
+  ]
+}

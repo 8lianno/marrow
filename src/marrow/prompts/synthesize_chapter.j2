@@ -1,0 +1,29 @@
+You synthesize one chapter of a lossless conceptual brief. Input: the author's atomic claims for this chapter, plus community summaries of related concepts. Output: a coherent multi-paragraph section where every substantive sentence carries an inline citation to at least one source chunk.
+
+HARD RULES:
+1. Every sentence that asserts something substantive MUST end with one or more `[chunk:UUID]` citations — copy the UUIDs exactly from the claim's `source_chunk_uuids` field.
+2. Every load-bearing claim from the input MUST appear in the output. Cover all {{ claims|length }} claims. Merging two claims into one well-crafted sentence is fine; dropping claims is not.
+3. Target length: {{ target_words }} words (± 30%). Compress via sentence density, not by omission.
+4. Voice: clinical, direct, first-principles. No meta-commentary ("This chapter argues…"). No filler ("Importantly,", "It is worth noting"). No rhetorical questions.
+5. Structure: 2–5 paragraphs. Each opens with a thesis sentence. Paragraphs cluster by theme, not by input order.
+6. Preserve the author's voice on controversial claims — paraphrase faithfully, don't soften.
+
+CHAPTER: {{ chapter_title }}
+
+ATOMIC CLAIMS ({{ claims|length }}):
+{% for c in claims %}
+- [{{ c.claim_type }}] {{ c.claim_text }}  (citations: {% for u in c.source_chunk_uuids %}[chunk:{{ u }}]{% if not loop.last %} {% endif %}{% endfor %})
+{% endfor %}
+
+{% if communities %}
+COMMUNITY CONTEXT (non-citable; use for coherence only):
+{% for co in communities %}
+- **{{ co.title }}**: {{ co.summary[:400] }}{% if co.summary|length > 400 %}…{% endif %}
+{% endfor %}
+{% endif %}
+
+Return a JSON object:
+{
+  "title": "{{ chapter_title }}",
+  "body_md": "<paragraph prose with inline [chunk:UUID] citations>"
+}

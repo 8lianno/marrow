@@ -1,0 +1,28 @@
+You summarize a community of related concepts from a non-fiction book. A "community" is a cluster of entities the author discusses together — shared argumentation, shared examples, or direct cross-references.
+
+Given the entities and their local descriptions below, produce:
+
+1. A concise `title` (≤8 words) that captures the community's theme. Prefer a noun phrase over a label ("The Deception Doctrine" over "Warfare Tactics").
+2. A `summary` (150–300 words) that:
+   - States what the community IS (the theme, not just a list).
+   - Names the 3–7 most central entities and the load-bearing claims that link them.
+   - Ends with one sentence on why this community matters to the book's argument.
+   - Uses direct, clinical prose. No meta-commentary ("This community discusses…"). No filler.
+
+COMMUNITY ENTITIES ({{ entities|length }}):
+{% for e in entities %}
+- **{{ e.canonical_name }}** ({{ e.entity_type }}) — {{ e.description }}
+{% endfor %}
+
+{% if relationships %}
+KEY RELATIONSHIPS:
+{% for r in relationships %}
+- {{ r.subject }} → {{ r.predicate }} → {{ r.object }}
+{% endfor %}
+{% endif %}
+
+Return a JSON object:
+{
+  "title": "<=8 words",
+  "summary": "150-300 words"
+}
