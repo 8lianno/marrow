@@ -66,6 +66,231 @@ Every artifact crossing a stage boundary is a Pydantic v2 model serialized to
 JSONL in `runs/<book-slug>/<NN>_<stage>/`. Resuming mid-pipeline (`--resume`)
 skips any stage that wrote a `_complete` marker.
 
+## Per-stage flow
+
+Each stage below has a short diagram of its internal pipeline. Click to expand.
+
+<details>
+<summary><strong>01_ingest</strong> — PDF/EPUB → <code>CanonicalDocument</code> with hierarchy and per-paragraph provenance</summary>
+
+```mermaid
+flowchart TD
+    IN[📄 PDF / EPUB]:::io --> DC[Docling DocumentConverter]:::op
+    DC --> II[iterate_items]:::op
+    II --> SW[Walk items, refine heading levels<br/>by text pattern when Docling flattens]:::op
+    SW --> TREE[Hierarchical SectionNode tree<br/>+ ParagraphNode with page_no]:::data
+    TREE --> AUD{ChapterCoverageAudit<br/>headings detected?}:::gate
+    AUD -->|pass| OUT1[document.json]:::io
+    TREE --> MD[Render source.md<br/>with ^paragraph_uuid anchors]:::op
+    MD --> OUT2[source.md]:::io
+    AUD -->|fallback| FB[pypdf plain-text<br/>+ Chapter-N heuristic]:::op
+    FB --> TREE
+
+    classDef io fill:#2d3a4a,stroke:#4a5e7a,color:#fff
+    classDef op fill:#222,stroke:#888,color:#fff
+    classDef data fill:#2d4a2d,stroke:#4a7a4a,color:#fff
+    classDef gate fill:#4a3a2d,stroke:#7a5e4a,color:#fff
+```
+
+</details>
+
+<details>
+<summary><strong>02_chunk</strong> — paragraph-aligned chunks with Jina v2 late-chunking embeddings</summary>
+
+```mermaid
+flowchart TD
+    IN[document.json]:::io --> IP[Flatten to paragraphs<br/>with chapter_path + page]:::op
+    IP --> PLAN[plan_chunks:<br/>target tokens + overlap<br/>respects chapter boundaries]:::op
+    PLAN --> EMB[Embedder<br/>Jina v2 late-chunk pool<br/>or StubEmbedder]:::op
+    EMB --> WS[Sliding window + 25% overlap<br/>for docs > 8192 tokens]:::op
+    WS --> REC[ChunkRecord<br/>UUID5 deterministic IDs]:::data
+    REC --> AUD{paragraph coverage<br/>== 100%?}:::gate
+    AUD --> OUT1[chunks.jsonl]:::io
+    REC --> VEC[LanceDB Arrow table<br/>768-dim fixed-size]:::op
+    VEC --> OUT2[vectors.lance/]:::io
+
+    classDef io fill:#2d3a4a,stroke:#4a5e7a,color:#fff
+    classDef op fill:#222,stroke:#888,color:#fff
+    classDef data fill:#2d4a2d,stroke:#4a7a4a,color:#fff
+    classDef gate fill:#4a3a2d,stroke:#7a5e4a,color:#fff
+```
+
+</details>
+
+<details>
+<summary><strong>03_graph</strong> — entity/relationship extraction + Louvain communities with coverage audit</summary>
+
+```mermaid
+flowchart TD
+    IN[chunks.jsonl]:::io --> EX[Per chunk:<br/>LLM extract_graph.j2<br/>→ ExtractedGraphResponse]:::llm
+    EX --> MERGE[Merge entities by<br/>normalized canonical_name]:::op
+    MERGE --> RES[Resolve relationship endpoints<br/>drop dangling edges]:::op
+    RES --> NX[Build NetworkX graph<br/>weighted by confidence]:::op
+    NX --> LOU[Louvain community detection<br/>seed=42 deterministic]:::op
+    LOU --> SUM[Per community:<br/>LLM summarize_community.j2<br/>→ title + 150–300w summary]:::llm
+    SUM --> CA{CoverageAudit<br/>every chunk in a community?}:::gate
+    CA -->|orphans exist| ORPH[Synthetic _orphans bucket]:::op
+    CA -->|100%| DONE[coverage_pct = 100]:::data
+    ORPH --> DONE
+    DONE --> OUT1[entities.jsonl]:::io
+    DONE --> OUT2[relations.jsonl]:::io
+    DONE --> OUT3[communities.jsonl]:::io
+    DONE --> OUT4[graph.graphml]:::io
+
+    classDef io fill:#2d3a4a,stroke:#4a5e7a,color:#fff
+    classDef op fill:#222,stroke:#888,color:#fff
+    classDef llm fill:#3a2d4a,stroke:#5e4a7a,color:#fff
+    classDef data fill:#2d4a2d,stroke:#4a7a4a,color:#fff
+    classDef gate fill:#4a3a2d,stroke:#7a5e4a,color:#fff
+```
+
+</details>
+
+<details>
+<summary><strong>04_claims</strong> — SciClaims-style atomic claim extraction + semantic dedup at 0.92 cosine</summary>
+
+```mermaid
+flowchart TD
+    IN[chunks.jsonl]:::io --> EX[Per chunk:<br/>LLM extract_claims.j2<br/>→ ExtractedClaimsResponse]:::llm
+    EX --> FAIL{chunk failed?}:::gate
+    FAIL -->|yes| LOG[failed_chunks log<br/>stage continues]:::op
+    FAIL -->|no| BUILD[Build AtomicClaim<br/>UUID5 from claim_text + book_slug]:::op
+    BUILD --> MERGE[Exact-text merge<br/>via claim_id collision]:::op
+    MERGE --> EMBED[Embed claim texts<br/>via embedder]:::op
+    EMBED --> COS[Pairwise cosine similarity<br/>threshold 0.92]:::op
+    COS --> DUP[Mark is_duplicate_of<br/>keep first occurrence]:::op
+    DUP --> OUT1[claims.jsonl]:::io
+    DUP --> MANI[ClaimsManifest<br/>extracted / after_dedup / failed]:::data
+    MANI --> OUT2[dedup_report.json]:::io
+
+    classDef io fill:#2d3a4a,stroke:#4a5e7a,color:#fff
+    classDef op fill:#222,stroke:#888,color:#fff
+    classDef llm fill:#3a2d4a,stroke:#5e4a7a,color:#fff
+    classDef data fill:#2d4a2d,stroke:#4a7a4a,color:#fff
+    classDef gate fill:#4a3a2d,stroke:#7a5e4a,color:#fff
+```
+
+</details>
+
+<details>
+<summary><strong>05_synthesize</strong> — hierarchical per-chapter synthesis with inline <code>[chunk:UUID]</code> citations</summary>
+
+```mermaid
+flowchart TD
+    C[claims.jsonl]:::io --> GRP[Group claims by chapter<br/>via source_chunk_uuids → chunk → chapter]:::op
+    COM[communities.jsonl]:::io --> GRPC[Route communities by<br/>majority-vote on chunk chapters]:::op
+    DOC[document.json]:::io --> ORD[Chapter order from ToC]:::op
+    GRP --> BUDG[Allocate word budget<br/>proportional to claim share]:::op
+    BUDG --> SYN[Per chapter:<br/>LLM synthesize_chapter.j2<br/>→ ChapterSynthesisResponse]:::llm
+    GRPC --> SYN
+    ORD --> SYN
+    SYN --> PARSE[Parse body_md for<br/>chunk:UUID citations]:::op
+    PARSE --> COV{Every source chunk<br/>cited in output?}:::gate
+    COV --> DRAFT[BriefDraft<br/>sections + word_count + citation_density]:::data
+    DRAFT --> OUT1[draft_brief.json]:::io
+    COV --> AUDIT[merge_tree.json<br/>per-chapter audit:<br/>input_claims, citations_found, missing_chunks]:::data
+    AUDIT --> OUT2[merge_tree.json]:::io
+
+    classDef io fill:#2d3a4a,stroke:#4a5e7a,color:#fff
+    classDef op fill:#222,stroke:#888,color:#fff
+    classDef llm fill:#3a2d4a,stroke:#5e4a7a,color:#fff
+    classDef data fill:#2d4a2d,stroke:#4a7a4a,color:#fff
+    classDef gate fill:#4a3a2d,stroke:#7a5e4a,color:#fff
+```
+
+</details>
+
+<details>
+<summary><strong>05b_validate</strong> — SummQ adversarial quiz loop with per-chapter regeneration</summary>
+
+```mermaid
+flowchart TD
+    C[chunks.jsonl]:::io --> SAMP[Sample ≤ 30 chunks<br/>seeded RNG]:::op
+    SAMP --> QG[Per chunk:<br/>LLM quiz_generate.j2<br/>→ GeneratedQuiz]:::llm
+    QG --> QUIZ[QuizQuestion set<br/>stable across iterations]:::data
+    D[draft_brief.json]:::io --> LOOP
+
+    subgraph LOOP[Iteration up to max_iterations]
+        EX[Per question:<br/>LLM examinee_answer.j2]:::llm
+        GR[Per answer:<br/>LLM quiz_grade.j2]:::llm
+        EX --> GR
+        GR --> PASS{pass_rate ≥<br/>threshold?}:::gate
+        PASS -->|no, not max| REGEN[Identify chapters by<br/>failure count → re-run<br/>stage_05 synthesis on them]:::op
+        REGEN --> EX
+    end
+
+    QUIZ --> LOOP
+    LOOP --> BEST[Keep best-pass-rate draft]:::op
+    BEST --> OUT1[final_brief.json]:::io
+    LOOP --> ITER[iter_NN/<br/>quiz.jsonl + results.json]:::io
+
+    classDef io fill:#2d3a4a,stroke:#4a5e7a,color:#fff
+    classDef op fill:#222,stroke:#888,color:#fff
+    classDef llm fill:#3a2d4a,stroke:#5e4a7a,color:#fff
+    classDef data fill:#2d4a2d,stroke:#4a7a4a,color:#fff
+    classDef gate fill:#4a3a2d,stroke:#7a5e4a,color:#fff
+```
+
+</details>
+
+<details>
+<summary><strong>06a_evaluate</strong> — BooookScore + FActScore + HAMLET composite with PASS/FAIL verdict</summary>
+
+```mermaid
+flowchart TD
+    B[final_brief.json]:::io --> BS[BooookScore:<br/>LLM coherence per chapter<br/>→ avg 0.0–1.0]:::llm
+    B --> FS[FActScore:<br/>sample ≤ 20 cited sentences<br/>LLM verify against source chunk]:::llm
+    C[chunks.jsonl]:::io --> FS
+    B --> HAM
+    D[document.json]:::io --> HAM
+    CL[claims.jsonl]:::io --> HAM
+    subgraph HAM[HAMLET deterministic recall]
+        R[root: chapters covered]:::op
+        BR[branch: chunks cited]:::op
+        L[leaf: claims whose chunk is cited]:::op
+    end
+    BS --> COMP[Composite = weighted sum<br/>0.20·B + 0.30·F + 0.30·leaf<br/>+ 0.10·branch + 0.10·root]:::op
+    FS --> COMP
+    HAM --> COMP
+    COMP --> V{All three above<br/>configured thresholds?}:::gate
+    V -->|yes| PASS[verdict = PASS]:::data
+    V -->|no| FAIL[verdict = FAIL<br/>+ failure_reasons]:::data
+    PASS --> OUT[composite.json<br/>EvaluationReport]:::io
+    FAIL --> OUT
+
+    classDef io fill:#2d3a4a,stroke:#4a5e7a,color:#fff
+    classDef op fill:#222,stroke:#888,color:#fff
+    classDef llm fill:#3a2d4a,stroke:#5e4a7a,color:#fff
+    classDef data fill:#2d4a2d,stroke:#4a7a4a,color:#fff
+    classDef gate fill:#4a3a2d,stroke:#7a5e4a,color:#fff
+```
+
+</details>
+
+<details>
+<summary><strong>06b_export</strong> — Obsidian Markdown with citation round-trip audit</summary>
+
+```mermaid
+flowchart TD
+    C[chunks.jsonl]:::io --> SRC[Render Source.md<br/>chunk-by-chunk<br/>each preceded by ^chunk_uuid]:::op
+    B[final_brief.json]:::io --> BRF[Render Brief.md<br/>translate chunk:UUID →<br/>slug_Source#^UUID wikilinks]:::op
+    E[composite.json]:::io --> EV[Render Evaluation.md<br/>verdict + metrics table]:::op
+    SRC --> RT{Citation round-trip:<br/>every brief anchor resolves<br/>in Source.md?}:::gate
+    BRF --> RT
+    RT -->|pass| OUT1[slug_Source.md]:::io
+    RT -->|pass| OUT2[slug_Brief.md]:::io
+    EV --> OUT3[slug_Evaluation.md]:::io
+    RT -->|unresolved| WARN[warning in StageResult<br/>status becomes warning]:::op
+    WARN --> OUT2
+
+    classDef io fill:#2d3a4a,stroke:#4a5e7a,color:#fff
+    classDef op fill:#222,stroke:#888,color:#fff
+    classDef data fill:#2d4a2d,stroke:#4a7a4a,color:#fff
+    classDef gate fill:#4a3a2d,stroke:#7a5e4a,color:#fff
+```
+
+</details>
+
 ## Quick start
 
 ```bash
