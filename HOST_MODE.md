@@ -270,68 +270,55 @@ The remaining stages decompose as follows:
 
 ## 7. The Skill File
 
-The skill file lives at `marrow-skill/SKILL.md` inside the Marrow repo and is published as a Claude Code skill. Its structure:
+The skill ships at [`skills/claude-code/marrow/SKILL.md`](skills/claude-code/marrow/SKILL.md) and is the shortest path between a Claude Code session and a running pipeline. It covers task discovery, schema matching, error isolation, and stop conditions.
 
-```markdown
----
-name: marrow
-description: |
-  Run the Marrow lossless book-to-brief pipeline using your own
-  Claude Code session tokens. Triggers on "process this book with marrow",
-  "run marrow on book.pdf", "continue the marrow run", or any request
-  to compress a non-fiction book into a 50-page brief with full citations.
----
+### Install
 
-# Marrow — Host Mode Skill
+Symlink the skill into your Claude Code skills directory:
 
-## Overview
-You are running Marrow inside a Claude Code session. You will drive the
-pipeline by calling `marrow next <slug>` and responding to the tasks it
-returns. All reasoning happens in this session — Marrow itself never
-calls an LLM in Host Mode.
-
-## Workflow
-1. Start a run: `marrow run <book.pdf> --mode host`
-2. Loop:
-   a. Run `marrow next <slug>`
-   b. Read the returned task type and section reference
-   c. Read the pending task files
-   d. Perform the reasoning (you are the LLM here)
-   e. Write result files in the format declared in the task
-   f. Run `marrow next <slug>` again
-3. When `marrow next` returns `{"status": "complete"}`, the brief is in
-   the configured Obsidian vault.
-
-## Task Types (each documented in detail below)
-- entity_extract — Stage 03
-- relation_extract — Stage 03
-- community_summary — Stage 03
-- claim_extract — Stage 04
-- synthesize_chapter — Stage 05
-- synthesize_book — Stage 05
-- quiz_generate — Stage 05b
-- examinee_answer — Stage 05b
-- evaluate_claim — Stage 06a
-
-## Per-task instructions
-[detailed schemas and prompt templates for each task type]
-
-## Resumption
-If the user says "continue the marrow run", run `marrow status` to find
-in-progress runs, then `marrow next <slug>` to pick up where you left off.
-
-## Failure handling
-Every task that fails schema validation is written back as a corrective
-task. Do not retry without reading the new task file — the corrections
-matter.
-
-## Cost reporting
-After each stage, run `marrow cost <slug>` to see the estimated host
-token usage. This is an estimate; real cost lives in your Claude Code
-billing.
+```bash
+mkdir -p ~/.claude/skills
+ln -s "$(pwd)/skills/claude-code/marrow" ~/.claude/skills/marrow
 ```
 
-The full skill file is 800–1500 lines and includes one detailed section per task type with input schema, output schema, and a worked example. It is the longest single document in the Marrow repo and the most user-facing surface after the README.
+Or copy it if you prefer:
+
+```bash
+cp -r skills/claude-code/marrow ~/.claude/skills/marrow
+```
+
+After restart, `/marrow` is available in any Claude Code session.
+
+### Invoke
+
+```
+/marrow /path/to/book.pdf
+```
+
+The skill:
+1. Launches `marrow run <book> --mode host --force` in the background.
+2. Enters a task loop: scans `runs/<slug>/host_tasks/` for unprocessed task files, reads each, produces a schema-valid response, writes to `runs/<slug>/host_results/`.
+3. Exits when the background process completes and no tasks remain.
+4. Reports the final brief path.
+
+Resume an in-progress run:
+
+```
+/marrow <book-slug>
+```
+
+The skill detects the existing `runs/<slug>/` directory and uses `--resume` to pick up from the last completed stage marker.
+
+### Structure
+
+The skill does not re-document every prompt — each task's `prompt` field contains the complete rendered instructions with output-format rules. The skill only documents:
+
+- The task/result file contract (`HostTask` / `HostResult` shapes from [`src/marrow/schemas/run.py`](src/marrow/schemas/run.py))
+- The map of `{stage, model_role}` pairs to expected response schemas
+- Schema gotchas (UUID formatting, enum literals, min-length constraints)
+- Stop conditions and error handling
+
+The skill is ~150 lines and stays that way because the per-task detail lives in the Jinja templates under [`src/marrow/prompts/`](src/marrow/prompts/) — the same templates the API-mode backends render.
 
 ---
 
