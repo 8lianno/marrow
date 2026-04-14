@@ -72,14 +72,29 @@ skips any stage that wrote a `_complete` marker.
 # Install
 uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
+```
 
-# Default: host mode (no API key, your host agent does the reasoning)
-marrow run path/to/book.pdf
+### Run it inside Claude Code (host mode, zero API keys)
 
-# API mode with local Ollama (qwen3:14b on localhost:11434)
+```bash
+# Install the skill once:
+ln -s "$(pwd)/skills/claude-code/marrow" ~/.claude/skills/marrow
+
+# Then in any Claude Code session:
+/marrow /path/to/book.pdf
+```
+
+Claude Code launches Marrow in the background, then processes each task file
+Marrow emits (graph extraction, claim extraction, synthesis, quiz, grading,
+coherence, fact verification) using your session tokens. $0.00 metered cost.
+
+### Run it with an LLM provider (API mode)
+
+```bash
+# Local Ollama (qwen3:14b on localhost:11434) — default
 marrow run path/to/book.pdf --mode api
 
-# API mode with OpenRouter or Gemini or Anthropic
+# OpenRouter / Gemini / Anthropic presets
 marrow run path/to/book.pdf --mode api --config configs/openrouter.yaml
 marrow run path/to/book.pdf --mode api --config configs/gemini.yaml
 marrow run path/to/book.pdf --mode api --config configs/anthropic.yaml
@@ -115,23 +130,42 @@ where quality matters most.
 - [PRD.md](PRD.md) — product requirements, user stories, acceptance metrics
 - [ARCHITECTURE.md](ARCHITECTURE.md) — principles, stage contract, decisions
 - [ROADMAP.md](ROADMAP.md) — M0 walking skeleton → M1–M6 stage-fill milestones
-- [HOST_MODE.md](HOST_MODE.md) — task/result protocol for Claude Code / Codex
+- [HOST_MODE.md](HOST_MODE.md) — task/result protocol + skill install
 - [API.md](API.md) — CLI surface + internal module APIs + stage contract
 - [DATABASE.md](DATABASE.md) — working-directory layout + SQLite cost ledger
 - [BRAND.md](BRAND.md) — name, voice, positioning
 - [REPOS.md](REPOS.md) — upstream open-source inventory
 - [CLAUDE.md](CLAUDE.md) — per-session dev guide for Claude Code / Codex
 
+## What's inside
+
+| Category | Lines |
+|---|---:|
+| Source (`src/marrow/`) | 5,102 |
+| Tests (`tests/`) | 3,023 |
+| Prompts (Jinja, `src/marrow/prompts/`) | 254 |
+| Configs (YAML, `configs/`) | 139 |
+| Claude Code skill (`skills/claude-code/marrow/`) | 119 |
+| Docs (top-level `*.md`) | 3,982 |
+
+Eight Pydantic-validated stages, five LLM providers (Ollama, Anthropic,
+Gemini, OpenRouter, host-mode), one mandatory `marrow.llm.call()` wrapper
+that handles cost ledger + retry + schema validation + budget enforcement
+in both modes.
+
 ## Status
 
-All eight stages real end-to-end. 61 fast tests passing. Known gaps:
+All eight stages real end-to-end. 61 fast tests passing. Host Mode
+verified — drove a full pipeline through stages 01→03 via the skill,
+cost ledger recorded provider=`host` at $0.00, schema validation passed
+on every result.
 
+**Known gaps:**
 - Tested on tiny synthetic fixtures, not a real 300-page book yet.
-- Current default model (`qwen3:14b` local) is strong for extraction but
-  verbose for synthesis; `configs/anthropic.yaml` or `configs/gemini.yaml`
-  produce cleaner briefs when you need PASS verdicts.
-- No polished Claude Code / Codex skill file for Host Mode yet — the protocol
-  works, but a host-agent playbook needs to land before the UX feels seamless.
+- Default synthesis model (`qwen3:14b` local) is strong for extraction
+  but verbose for synthesis; `configs/anthropic.yaml` or
+  `configs/gemini.yaml` produce cleaner briefs when you need PASS
+  verdicts from the lossless gate.
 
 ## License
 
