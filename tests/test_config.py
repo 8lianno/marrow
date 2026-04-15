@@ -40,7 +40,7 @@ def test_cheap_extends_default(tmp_path: Path) -> None:
     cfg = load_config(config_path=Path("configs/cheap.yaml"))
     assert cfg.mode == "host"
     assert cfg.cost.max_per_book == 0.50  # cheap.yaml override
-    assert cfg.chunk.window_tokens == 512  # inherited from default
+    assert cfg.chunk.window_tokens == 4096  # inherited from default
 
 
 def test_ollama_preset_is_explicit_api_mode() -> None:
@@ -57,9 +57,18 @@ def test_express_preset_disables_validate_and_evaluate() -> None:
     assert cfg.evaluate.skip is True
     # Everything else inherits from default.
     assert cfg.mode == "host"
-    assert cfg.chunk.window_tokens == 512
+    assert cfg.chunk.window_tokens == 4096
 
 
 def test_evaluate_skip_defaults_false() -> None:
     cfg = load_config()
     assert cfg.evaluate.skip is False
+
+
+def test_chunk_defaults_use_optimized_window() -> None:
+    """US-012: 4096-token window reduces extraction calls ~8x vs. 512 baseline."""
+    cfg = load_config()
+    assert cfg.chunk.window_tokens == 4096
+    assert cfg.chunk.overlap_pct == 0.10
+    # Must stay within Jina v2 context limit (see src/marrow/embed.py max_seq_length).
+    assert cfg.chunk.window_tokens <= 8192

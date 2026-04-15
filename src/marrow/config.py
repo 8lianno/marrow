@@ -29,8 +29,8 @@ class IngestConfig(BaseModel):
 
 class ChunkConfig(BaseModel):
     embedding_model: str = "jinaai/jina-embeddings-v2-base-en"
-    window_tokens: int = 512
-    overlap_pct: float = 0.25
+    window_tokens: int = 4096
+    overlap_pct: float = 0.10
 
 
 class GraphConfig(BaseModel):
