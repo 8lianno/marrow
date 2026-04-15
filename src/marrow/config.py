@@ -100,6 +100,13 @@ class LoggingConfig(BaseModel):
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
 
+class MonitorConfig(BaseModel):
+    input_dir: str | None = None
+    output_dir: str | None = None
+    poll_interval_seconds: float = 5.0
+    supported_extensions: list[str] = Field(default_factory=lambda: [".pdf", ".epub"])
+
+
 class MarrowConfig(BaseModel):
     mode: RunMode = "host"
     ingest: IngestConfig = Field(default_factory=IngestConfig)
@@ -114,6 +121,7 @@ class MarrowConfig(BaseModel):
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     host: HostConfig = Field(default_factory=HostConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    monitor: MonitorConfig = Field(default_factory=MonitorConfig)
     runs_dir: str = "runs"
 
     model_config = {"populate_by_name": True}

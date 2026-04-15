@@ -65,6 +65,15 @@ def test_evaluate_skip_defaults_false() -> None:
     assert cfg.evaluate.skip is False
 
 
+def test_monitor_config_defaults() -> None:
+    """US-013: monitor section exists with null input/output and 5s poll default."""
+    cfg = load_config()
+    assert cfg.monitor.input_dir is None
+    assert cfg.monitor.output_dir is None
+    assert cfg.monitor.poll_interval_seconds == 5.0
+    assert ".pdf" in cfg.monitor.supported_extensions
+
+
 def test_chunk_defaults_use_optimized_window() -> None:
     """US-012: 4096-token window reduces extraction calls ~8x vs. 512 baseline."""
     cfg = load_config()

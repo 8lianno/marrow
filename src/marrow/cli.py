@@ -28,6 +28,7 @@ from marrow.orchestrator import discover_stages, is_complete, run_pipeline, work
 from marrow.progress import reset_current, select_reporter, set_current
 from marrow.schemas.run import HostResult, HostTask, RunManifest
 from marrow.slug import book_slug, slugify
+from marrow.watch import run_watch
 
 app = typer.Typer(
     name="marrow",
@@ -347,6 +348,54 @@ def submit(
             "stored_result_path": str(stored_path),
         }
     )
+
+
+@app.command()
+def watch(
+    input_dir: Path = typer.Option(
+        ..., "--input", exists=False, file_okay=False, help="Folder to monitor for new books"
+    ),
+    output_dir: Path = typer.Option(
+        ..., "--output", file_okay=False, help="Folder to deliver finished briefs to"
+    ),
+    mode: str | None = typer.Option(None, "--mode", help="host | api"),
+    config: Path | None = typer.Option(None, "--config", help="Path to YAML config"),
+    cost_cap: float | None = typer.Option(None, "--cost-cap", help="Override max_per_book USD"),
+    vault: Path | None = typer.Option(None, "--vault", help="Override Obsidian vault path"),
+    poll_interval: float | None = typer.Option(
+        None, "--poll-interval", help="Seconds between scans (default 5.0)"
+    ),
+    once: bool = typer.Option(
+        False, "--once", help="Process current contents once and exit (no polling loop)"
+    ),
+) -> None:
+    """Monitor --input; run the pipeline on dropped books; deliver briefs to --output.
+
+    Successful runs land in --output/ and the source moves to --input/processed/.
+    Failed runs move the source to --input/failed/ so the queue keeps flowing.
+    Interrupted runs resume on the next tick. Run one watcher per folder.
+    """
+    cfg = _resolve_config(config, mode, cost_cap, vault)
+    cfg.monitor.input_dir = str(input_dir)
+    cfg.monitor.output_dir = str(output_dir)
+    if poll_interval is not None:
+        cfg.monitor.poll_interval_seconds = poll_interval
+
+    configure_logging(cfg.logging.level, run_log_path=output_dir / "logs" / "watch.jsonl")
+    console.print(
+        f"[green]marrow watch[/green] input=[cyan]{input_dir}[/cyan] "
+        f"output=[cyan]{output_dir}[/cyan] once={once}"
+    )
+    try:
+        events = run_watch(cfg, once=once)
+    except MarrowError as e:
+        console.print(f"[red]{type(e).__name__}:[/red] {e}")
+        raise typer.Exit(code=int(e.exit_code))
+
+    if once:
+        succeeded = sum(1 for e in events if e.status == "success")
+        failed = sum(1 for e in events if e.status == "failed")
+        console.print(f"[green]done[/green] processed={len(events)} ok={succeeded} failed={failed}")
 
 
 @app.command()
