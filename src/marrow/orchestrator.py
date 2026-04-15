@@ -16,6 +16,7 @@ from marrow.errors import InputNotFound, ModeLockViolation, StageError
 from marrow.host import detect_host_info
 from marrow.io import read_json, write_json
 from marrow.logging import get_logger
+from marrow.progress import current as current_progress
 from marrow.schemas.run import RunManifest, StageResult
 from marrow.slug import book_slug
 
@@ -184,41 +185,57 @@ def run_pipeline(
     stage_results: list[StageResult] = []
     overall_status = "success"
 
-    for stage in stages:
-        if only_stage and only_stage not in (stage.name, stage.key, stage.dirname):
-            continue
-        if resume and is_complete(working_dir, stage):
-            log.info("stage_skipped_already_complete", stage=stage.dirname)
-            existing = working_dir / stage.dirname / "result.json"
-            if existing.exists():
-                stage_results.append(read_json(existing, StageResult))
-            continue
+    progress = current_progress()
+    # Count the stages we will actually execute (honoring --stage filter and resume).
+    stages_to_run = [
+        s
+        for s in stages
+        if (not only_stage or only_stage in (s.name, s.key, s.dirname))
+        and not (resume and is_complete(working_dir, s))
+    ]
+    progress.pipeline_start(len(stages_to_run))
 
-        log.info("stage_starting", stage=stage.dirname)
-        try:
-            result = stage.run(working_dir, config)
-        except Exception as e:
-            log.error("stage_crashed", stage=stage.dirname, error=str(e))
-            overall_status = "failed"
-            _finalize_manifest(working_dir, manifest, stage_results, overall_status)
-            raise StageError(stage.dirname, str(e)) from e
+    try:
+        for stage in stages:
+            if only_stage and only_stage not in (stage.name, stage.key, stage.dirname):
+                continue
+            if resume and is_complete(working_dir, stage):
+                log.info("stage_skipped_already_complete", stage=stage.dirname)
+                existing = working_dir / stage.dirname / "result.json"
+                if existing.exists():
+                    stage_results.append(read_json(existing, StageResult))
+                continue
 
-        write_json(working_dir / stage.dirname / "result.json", result)
-        stage_results.append(result)
+            log.info("stage_starting", stage=stage.dirname)
+            # Stages own the call to progress.stage_start — they know their total.
+            try:
+                result = stage.run(working_dir, config)
+            except Exception as e:
+                log.error("stage_crashed", stage=stage.dirname, error=str(e))
+                progress.stage_end(stage.dirname, "failed", 0.0)
+                overall_status = "failed"
+                _finalize_manifest(working_dir, manifest, stage_results, overall_status)
+                raise StageError(stage.dirname, str(e)) from e
 
-        if result.status == "failed":
-            overall_status = "failed"
-            log.error("stage_reported_failure", stage=stage.dirname, errors=result.errors)
-            break
-        if result.status == "warning":
-            overall_status = "partial" if overall_status == "success" else overall_status
+            write_json(working_dir / stage.dirname / "result.json", result)
+            stage_results.append(result)
+            progress.stage_end(stage.dirname, result.status, result.duration_seconds)
 
-        mark_complete(working_dir, stage)
-        log.info(
-            "stage_complete",
-            stage=stage.dirname,
-            duration_s=result.duration_seconds,
-            cost_usd=result.cost_usd,
-        )
+            if result.status == "failed":
+                overall_status = "failed"
+                log.error("stage_reported_failure", stage=stage.dirname, errors=result.errors)
+                break
+            if result.status == "warning":
+                overall_status = "partial" if overall_status == "success" else overall_status
+
+            mark_complete(working_dir, stage)
+            log.info(
+                "stage_complete",
+                stage=stage.dirname,
+                duration_s=result.duration_seconds,
+                cost_usd=result.cost_usd,
+            )
+    finally:
+        progress.pipeline_end()
 
     return _finalize_manifest(working_dir, manifest, stage_results, overall_status)

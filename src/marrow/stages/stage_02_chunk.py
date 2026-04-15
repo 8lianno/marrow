@@ -24,6 +24,7 @@ from marrow.embed import get_embedder
 from marrow.ids import chunk_uuid as derive_chunk_uuid
 from marrow.io import read_json, write_jsonl
 from marrow.logging import get_logger
+from marrow.progress import current as progress_current
 from marrow.schemas.chunk import ChunkRecord
 from marrow.schemas.document import CanonicalDocument
 from marrow.schemas.run import StageResult
@@ -57,6 +58,9 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
         overlap_pct=config.chunk.overlap_pct,
     )
 
+    progress = progress_current()
+    progress.stage_start(STAGE_NAME, total=max(1, len(planned)), unit="chunk")
+
     embedder = _get_embedder(config)
     try:
         embeddings = embedder.embed_chunks(_concat_doc_text(paragraphs), planned)
@@ -64,6 +68,8 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
         warnings.append(f"embedding_failed ({type(e).__name__}): {e}; using zero vectors")
         log.warning("embedding_failed_using_zeros", error=str(e))
         embeddings = [[0.0] * embedder.dim for _ in planned]
+    # Embedding is one opaque forward pass; fill the bar once it returns.
+    progress.stage_advance(len(planned))
 
     chunks = _to_chunk_records(planned, embeddings, doc.book_slug, embedder.model_name)
 

@@ -85,7 +85,9 @@ Marrow's stages 03/04/05/05b/06a each need LLM reasoning. In host mode, instead 
 
    h. Loop to (a).
 
-4. **On completion**: run `marrow status <slug>` and show the user the final table. The brief is at `runs/<slug>/06b_export/<slug>_Brief.md`, the evaluation at `<slug>_Evaluation.md`.
+4. **Report progress periodically.** After every ~4 submitted results, run `marrow tasks "<slug>"` and surface a one-line summary to the user in chat, e.g. `stage 04 claims: 12/23 done (5 pending, 6 claimed)`. Use the per-stage breakdown in the response — do **not** spam after every single submission. The goal is visibility without clutter. For stages with only a few tasks (`05_synthesize`, `06a_evaluate`), one line per stage transition is enough.
+
+5. **On completion**: run `marrow status <slug>` and show the user the final table. The brief is at `runs/<slug>/06b_export/<slug>_Brief.md`, the evaluation at `<slug>_Evaluation.md`.
 
 ## Task types you'll see
 

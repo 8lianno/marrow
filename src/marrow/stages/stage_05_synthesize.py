@@ -31,6 +31,7 @@ from marrow.ids import section_id as derive_section_id
 from marrow.io import read_json, read_jsonl, write_json
 from marrow.llm import LLMCaller
 from marrow.logging import get_logger
+from marrow.progress import current as progress_current
 from marrow.prompts import render
 from marrow.schemas.brief import (
     BriefDraft,
@@ -78,6 +79,10 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
     merge_tree: dict[str, dict] = {}
     failed_chapters: list[str] = []
 
+    chapters_to_synthesize = [t for t in _chapter_order(doc) if claims_by_chapter.get(t)]
+    progress = progress_current()
+    progress.stage_start(STAGE_NAME, total=max(1, len(chapters_to_synthesize)), unit="chapter")
+
     for chapter_title in _chapter_order(doc):
         chapter_claims = claims_by_chapter.get(chapter_title, [])
         if not chapter_claims:
@@ -95,6 +100,7 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
         except LLMError as e:
             log.warning("chapter_synthesis_failed", chapter=chapter_title, error=str(e))
             failed_chapters.append(chapter_title)
+            progress.stage_advance(1)
             continue
         except Exception as e:  # isolate per-chapter crashes
             log.warning(
@@ -104,6 +110,7 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
                 error=str(e),
             )
             failed_chapters.append(chapter_title)
+            progress.stage_advance(1)
             continue
 
         cited = BriefSection.parse_citations(response.body_md)
@@ -133,6 +140,7 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
             warnings.append(
                 f"chapter_{_slug(chapter_title)}_missing_citations_for_{len(missing)}_chunks"
             )
+        progress.stage_advance(1)
 
     if failed_chapters:
         warnings.append(f"chapter_synthesis_failed on {len(failed_chapters)} chapter(s)")

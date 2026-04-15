@@ -32,6 +32,7 @@ from marrow.config import MarrowConfig
 from marrow.io import read_json, read_jsonl, write_json
 from marrow.llm import LLMCaller
 from marrow.logging import get_logger
+from marrow.progress import current as progress_current
 from marrow.prompts import render
 from marrow.schemas.brief import (
     CITATION_PATTERN,
@@ -73,11 +74,20 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
 
     caller = LLMCaller(working_dir, config)
 
+    # Progress: one tick per section (coherence), then per sampled fact. HAMLET is
+    # deterministic — no tick. Total is bounded by MAX_FACT_SAMPLES + sections.
+    progress = progress_current()
+    progress.stage_start(
+        STAGE_NAME,
+        total=max(1, len(final_brief.sections)),
+        unit="section/fact",
+    )
+
     # 1. BooookScore — per-chapter coherence.
-    booookscore, booook_per_section = _booookscore(caller, final_brief)
+    booookscore, booook_per_section = _booookscore(caller, final_brief, progress=progress)
 
     # 2. FActScore — sample claims supported by source.
-    factscore, length_penalty = _factscore(caller, final_brief, chunks)
+    factscore, length_penalty = _factscore(caller, final_brief, chunks, progress=progress)
 
     # 3. HAMLET — deterministic recall metrics.
     root_recall, branch_recall, leaf_recall = _hamlet(doc, chunks, claims, final_brief)
@@ -170,7 +180,9 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
 # ---- BooookScore (coherence) ----
 
 
-def _booookscore(caller: LLMCaller, brief: BriefDraft) -> tuple[float, dict[str, float]]:
+def _booookscore(
+    caller: LLMCaller, brief: BriefDraft, progress=None
+) -> tuple[float, dict[str, float]]:
     if not brief.sections:
         return 0.0, {}
     per_section: dict[str, float] = {}
@@ -181,6 +193,8 @@ def _booookscore(caller: LLMCaller, brief: BriefDraft) -> tuple[float, dict[str,
             log.warning("coherence_score_failed", section=section.title, error=str(e))
             score = 0.5
         per_section[section.title] = score
+        if progress is not None:
+            progress.stage_advance(1)
     avg = sum(per_section.values()) / len(per_section)
     return avg, per_section
 
@@ -220,7 +234,7 @@ def _salvage_score(raw: str) -> float:
 
 
 def _factscore(
-    caller: LLMCaller, brief: BriefDraft, chunks: list[ChunkRecord]
+    caller: LLMCaller, brief: BriefDraft, chunks: list[ChunkRecord], progress=None
 ) -> tuple[float, bool]:
     """Sample sentences with citations; verify each against its cited chunk.
 
@@ -241,20 +255,29 @@ def _factscore(
     if len(samples) > MAX_FACT_SAMPLES:
         samples = rng.sample(samples, MAX_FACT_SAMPLES)
 
+    if progress is not None:
+        progress.stage_extend(len(samples))
+
     supported = 0
     counted = 0
     for sentence, chunk_uuid in samples:
         chunk = chunk_by_uuid.get(chunk_uuid)
         if chunk is None:
+            if progress is not None:
+                progress.stage_advance(1)
             continue  # citation points to nonexistent chunk; HAMLET catches this
         try:
             verdict = _verify_one_fact(caller, sentence, chunk)
         except Exception as e:
             log.warning("fact_verify_failed", chunk_uuid=str(chunk_uuid), error=str(e))
+            if progress is not None:
+                progress.stage_advance(1)
             continue
         counted += 1
         if verdict.is_supported:
             supported += 1
+        if progress is not None:
+            progress.stage_advance(1)
 
     if counted == 0:
         return 0.0, length_penalty

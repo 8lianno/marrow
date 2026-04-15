@@ -29,6 +29,7 @@ from marrow.ids import section_id as derive_section_id
 from marrow.io import read_json, read_jsonl, write_json, write_jsonl
 from marrow.llm import LLMCaller
 from marrow.logging import get_logger
+from marrow.progress import current as progress_current
 from marrow.prompts import render
 from marrow.schemas.brief import (
     BriefDraft,
@@ -78,11 +79,21 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
         chunks if len(chunks) <= MAX_CHUNKS_QUIZZED else rng.sample(chunks, MAX_CHUNKS_QUIZZED)
     )
 
-    # Generate quiz once from source chunks (questions are stable across iterations).
-    quiz = _generate_quiz(caller, sampled_chunks)
-
     threshold = config.validate_.pass_rate_threshold
     max_iters = config.validate_.max_iterations
+
+    # Progress: quiz generation + (per-iter answer+grade, up to max_iters rounds).
+    # Exact question count is known only after generation; start with the
+    # quiz-generation portion and extend once the quiz is in hand.
+    progress = progress_current()
+    progress.stage_start(STAGE_NAME, total=max(1, len(sampled_chunks)), unit="quiz-gen/grade")
+
+    # Generate quiz once from source chunks (questions are stable across iterations).
+    quiz = _generate_quiz(caller, sampled_chunks, progress=progress)
+    # Add per-iteration work to the bar (answer + grade = 2 ticks per grounded question).
+    grounded_quiz = [q for q in quiz if q.is_grounded]
+    per_iter_ticks = len(grounded_quiz) * 2
+    progress.stage_extend(per_iter_ticks * max_iters)
 
     current_draft = initial_draft.model_copy(deep=True)
     iteration_results: list[QuizResult] = []
@@ -95,11 +106,15 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
 
         # Examine the current brief.
         write_jsonl(iter_dir / "quiz.jsonl", quiz)
-        results = _examine_brief(caller, current_draft, quiz, iter_idx)
+        results = _examine_brief(caller, current_draft, quiz, iter_idx, progress=progress)
         write_json(iter_dir / "results.json", results)
         iteration_results.append(results)
         current_draft.iteration_history.append(
             f"iter_{iter_idx:02d}: pass_rate={results.pass_rate:.3f}"
+        )
+        progress.stage_log(
+            f"iter {iter_idx}: pass_rate={results.pass_rate:.3f} "
+            f"({results.answered_correctly}/{results.grounded_questions} correct)"
         )
 
         if results.pass_rate > best_pass_rate:
@@ -166,7 +181,11 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
 # ---- Quiz generation ----
 
 
-def _generate_quiz(caller: LLMCaller, chunks: list[ChunkRecord]) -> list[QuizQuestion]:
+def _generate_quiz(
+    caller: LLMCaller,
+    chunks: list[ChunkRecord],
+    progress=None,
+) -> list[QuizQuestion]:
     out: list[QuizQuestion] = []
     for chunk in chunks:
         try:
@@ -177,6 +196,8 @@ def _generate_quiz(caller: LLMCaller, chunks: list[ChunkRecord]) -> list[QuizQue
                 chunk_uuid=str(chunk.chunk_uuid),
                 error=str(e),
             )
+            if progress is not None:
+                progress.stage_advance(1)
             continue
         for gq in response.questions:
             out.append(
@@ -190,6 +211,8 @@ def _generate_quiz(caller: LLMCaller, chunks: list[ChunkRecord]) -> list[QuizQue
                     is_grounded=gq.is_grounded,
                 )
             )
+        if progress is not None:
+            progress.stage_advance(1)
     return out
 
 
@@ -221,6 +244,7 @@ def _examine_brief(
     draft: BriefDraft,
     quiz: list[QuizQuestion],
     iteration: int,
+    progress=None,
 ) -> QuizResult:
     brief_md = _draft_to_md(draft)
     grounded_count = 0
@@ -233,7 +257,11 @@ def _examine_brief(
         grounded_count += 1
         try:
             answer = _ask_examinee(caller, question, brief_md)
+            if progress is not None:
+                progress.stage_advance(1)  # one for the answer call
             grade = _grade_answer(caller, question, answer)
+            if progress is not None:
+                progress.stage_advance(1)  # one for the grade call
         except LLMError as e:
             log.warning(
                 "examine_call_failed",

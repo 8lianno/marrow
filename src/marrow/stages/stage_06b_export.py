@@ -22,6 +22,7 @@ from uuid import UUID
 
 from marrow.config import MarrowConfig
 from marrow.io import read_json, read_jsonl, write_text
+from marrow.progress import current as progress_current
 from marrow.schemas.brief import CITATION_PATTERN, BriefDraft, BriefSection, EvaluationReport
 from marrow.schemas.chunk import ChunkRecord
 from marrow.schemas.run import StageResult
@@ -41,6 +42,9 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
     out_dir = _resolve_export_dir(working_dir, config, slug)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    progress = progress_current()
+    progress.stage_start(STAGE_NAME, total=3, unit="file")
+
     source_md = _render_source(brief.book_title, chunks)
     brief_md = _render_brief(brief, slug)
     eval_md = _render_evaluation(evaluation)
@@ -50,8 +54,11 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
     eval_path = out_dir / f"{slug}_Evaluation.md"
 
     write_text(source_path, source_md)
+    progress.stage_advance(1)
     write_text(brief_path, brief_md)
+    progress.stage_advance(1)
     write_text(eval_path, eval_md)
+    progress.stage_advance(1)
 
     # Citation round-trip audit.
     source_anchors = set(_extract_source_anchors(source_md))

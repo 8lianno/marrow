@@ -8,7 +8,7 @@ from pathlib import Path
 
 from marrow.config import HostConfig
 from marrow.io import dump_json, read_json
-from marrow.schemas.run import HostEnvironment, HostInfo, HostResult, HostTask, HostTaskClaim
+from marrow.schemas.run import HostInfo, HostResult, HostTask, HostTaskClaim
 
 
 def detect_host_info(env: dict[str, str] | None = None) -> HostInfo:
@@ -36,9 +36,13 @@ def quality_hints_for(stage: str, model_role: str) -> list[str]:
         "Read every evidence/input block in the prompt before answering.",
     ]
     if stage in {"03_graph", "05_synthesize", "05b_validate", "06a_evaluate"}:
-        hints.append("When multiple evidence boxes or candidate facts are present, compare all of them before finalizing.")
+        hints.append(
+            "When multiple evidence boxes or candidate facts are present, compare all of them before finalizing."
+        )
     if model_role in {"validation", "synthesis"}:
-        hints.append("If you delegate, have one worker own one claimed task end to end and keep the same quality bar as a direct answer.")
+        hints.append(
+            "If you delegate, have one worker own one claimed task end to end and keep the same quality bar as a direct answer."
+        )
     return hints
 
 
@@ -171,6 +175,38 @@ def task_counts(working_dir: Path, host_config: HostConfig) -> dict[str, int]:
             claimed += 1
     pending = max(total - completed - claimed, 0)
     return {"pending": pending, "claimed": claimed, "completed": completed, "total": total}
+
+
+def task_counts_by_stage(working_dir: Path, host_config: HostConfig) -> dict[str, dict[str, int]]:
+    """Group task counts by the stage that wrote each task.
+
+    Returns `{stage_name: {pending, claimed, completed, total}}`. Stages with
+    no tasks are omitted. Useful for `marrow status` and the Host Mode skill's
+    per-stage progress updates.
+    """
+    task_dir = working_dir / host_config.task_dir
+    result_dir = working_dir / host_config.result_dir
+    claim_dir = working_dir / host_config.claim_dir
+    if not task_dir.exists():
+        return {}
+
+    per_stage: dict[str, dict[str, int]] = {}
+    for task_path in task_dir.glob("*.json"):
+        try:
+            task = read_json(task_path, HostTask)
+        except Exception:
+            continue
+        bucket = per_stage.setdefault(
+            task.stage, {"pending": 0, "claimed": 0, "completed": 0, "total": 0}
+        )
+        bucket["total"] += 1
+        if (result_dir / task_path.name).exists():
+            bucket["completed"] += 1
+        elif _active_claim(claim_dir / task_path.name) is not None:
+            bucket["claimed"] += 1
+        else:
+            bucket["pending"] += 1
+    return per_stage
 
 
 def recommended_parallelism(host_config: HostConfig, stage: str, available_tasks: int) -> int:

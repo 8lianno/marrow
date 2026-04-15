@@ -25,6 +25,7 @@ from marrow.host import (
 from marrow.io import read_json
 from marrow.logging import configure as configure_logging
 from marrow.orchestrator import discover_stages, is_complete, run_pipeline, working_dir_for
+from marrow.progress import reset_current, select_reporter, set_current
 from marrow.schemas.run import HostResult, HostTask, RunManifest
 from marrow.slug import book_slug, slugify
 
@@ -65,24 +66,32 @@ def run(
     cost_cap: float | None = typer.Option(None, "--cost-cap", help="Override max_per_book USD"),
     vault: Path | None = typer.Option(None, "--vault", help="Override Obsidian vault path"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print stage plan and exit"),
+    no_progress: bool = typer.Option(
+        False, "--no-progress", help="Disable progress bars / stage-boundary lines"
+    ),
 ) -> None:
     """Run the full pipeline on BOOK_PATH."""
     cfg = _resolve_config(config, mode, cost_cap, vault)
     working_dir = working_dir_for(cfg, book_path)
     configure_logging(cfg.logging.level, run_log_path=working_dir / "logs" / "run.jsonl")
 
+    reporter = select_reporter(mode=cfg.mode, no_progress=no_progress)
+    token = set_current(reporter)
     try:
-        manifest = run_pipeline(
-            book_path,
-            cfg,
-            resume=resume,
-            force=force,
-            only_stage=only_stage,
-            dry_run=dry_run,
-        )
-    except MarrowError as e:
-        console.print(f"[red]{type(e).__name__}:[/red] {e}")
-        raise typer.Exit(code=int(e.exit_code))
+        try:
+            manifest = run_pipeline(
+                book_path,
+                cfg,
+                resume=resume,
+                force=force,
+                only_stage=only_stage,
+                dry_run=dry_run,
+            )
+        except MarrowError as e:
+            console.print(f"[red]{type(e).__name__}:[/red] {e}")
+            raise typer.Exit(code=int(e.exit_code))
+    finally:
+        reset_current(token)
 
     _print_summary(manifest)
     if manifest.status == "failed":
@@ -94,7 +103,9 @@ def status(
     book: str = typer.Argument(..., help="Book slug or path"),
     config: Path | None = typer.Option(None, "--config"),
 ) -> None:
-    """Show stage completion for a run."""
+    """Show stage completion for a run, including the active stage if one is in progress."""
+    import time
+
     cfg = load_config(config_path=config)
     slug = _book_to_slug(book)
     working_dir = Path(cfg.runs_dir) / slug
@@ -102,28 +113,47 @@ def status(
         console.print(f"[yellow]No run found for slug:[/yellow] {slug}")
         raise typer.Exit(code=int(MarrowExitCode.INPUT_NOT_FOUND))
 
+    # Per-stage task counts for Host Mode runs.
+    from marrow.host import task_counts_by_stage
+
+    per_stage_tasks = task_counts_by_stage(working_dir, cfg.host)
+
     table = Table(title=f"Run status: {slug}")
     table.add_column("Stage")
     table.add_column("State", justify="center")
     table.add_column("Duration (s)", justify="right")
     table.add_column("Cost (USD)", justify="right")
+    table.add_column("Tasks (done/total)", justify="right")
 
     for stage in discover_stages():
         complete = is_complete(working_dir, stage)
-        result_path = working_dir / stage.dirname / "result.json"
+        stage_dir = working_dir / stage.dirname
+        result_path = stage_dir / "result.json"
         dur, cost = "-", "-"
-        if result_path.exists():
+        state_cell = "[dim]—[/dim]"
+
+        if complete and result_path.exists():
             from marrow.schemas.run import StageResult
 
             r = read_json(result_path, StageResult)
             dur = f"{r.duration_seconds:.2f}"
             cost = f"{r.cost_usd:.4f}"
-        table.add_row(
-            stage.dirname,
-            "[green]✓[/green]" if complete else "[dim]—[/dim]",
-            dur,
-            cost,
-        )
+            state_cell = "[green]✓[/green]"
+        elif stage_dir.exists():
+            # Active stage: directory exists but no _complete marker.
+            elapsed = time.time() - stage_dir.stat().st_mtime
+            dur = f"{elapsed:.0f} (active)"
+            state_cell = "[yellow]⏳[/yellow]"
+
+        tasks = per_stage_tasks.get(stage.dirname)
+        if tasks:
+            tasks_cell = f"{tasks['completed']}/{tasks['total']}"
+            if tasks.get("pending"):
+                tasks_cell += f" ([yellow]{tasks['pending']} pending[/yellow])"
+        else:
+            tasks_cell = "-"
+
+        table.add_row(stage.dirname, state_cell, dur, cost, tasks_cell)
     console.print(table)
 
 
@@ -198,7 +228,9 @@ def next_task(
         _print_json(
             {
                 "book_slug": slug,
-                "status": "complete" if (working_dir / "06b_export" / "_complete").exists() else "waiting",
+                "status": "complete"
+                if (working_dir / "06b_export" / "_complete").exists()
+                else "waiting",
                 "host_environment": host_info.environment,
                 "counts": task_counts(working_dir, cfg.host),
                 "tasks": [],
@@ -262,7 +294,9 @@ def tasks(
     pending_paths = claimable_task_paths(working_dir, cfg.host)[:limit]
     payload = {
         "book_slug": slug,
-        "status": "complete" if (working_dir / "06b_export" / "_complete").exists() else "in_progress",
+        "status": "complete"
+        if (working_dir / "06b_export" / "_complete").exists()
+        else "in_progress",
         "counts": task_counts(working_dir, cfg.host),
         "tasks": [
             task_payload(

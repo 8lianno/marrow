@@ -30,6 +30,7 @@ from marrow.ids import claim_id as derive_claim_id
 from marrow.io import read_jsonl, write_json, write_jsonl
 from marrow.llm import LLMCaller
 from marrow.logging import get_logger
+from marrow.progress import current as progress_current
 from marrow.prompts import render
 from marrow.schemas.chunk import ChunkRecord
 from marrow.schemas.claim import (
@@ -62,6 +63,9 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
     empty_chunks: list[UUID] = []
     total_tokens = 0
 
+    progress = progress_current()
+    progress.stage_start(STAGE_NAME, total=max(1, len(chunks)), unit="chunk")
+
     for chunk in chunks:
         total_tokens += chunk.token_count
         try:
@@ -73,6 +77,7 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
                 error=str(e),
             )
             failed_chunks.append(chunk.chunk_uuid)
+            progress.stage_advance(1)
             continue
         except Exception as e:
             log.warning(
@@ -82,15 +87,18 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
                 error=str(e),
             )
             failed_chunks.append(chunk.chunk_uuid)
+            progress.stage_advance(1)
             continue
 
         if not response.claims:
             empty_chunks.append(chunk.chunk_uuid)
+            progress.stage_advance(1)
             continue
 
         for ec in response.claims:
             claim = _to_atomic_claim(ec, chunk)
             all_claims.append(claim)
+        progress.stage_advance(1)
 
     # Semantic dedup.
     deduped = _semantic_dedup(all_claims, config)

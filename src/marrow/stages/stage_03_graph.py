@@ -38,6 +38,7 @@ from marrow.ids import relation_id as derive_relation_id
 from marrow.io import read_jsonl, write_json, write_jsonl
 from marrow.llm import LLMCaller
 from marrow.logging import get_logger
+from marrow.progress import current as progress_current
 from marrow.prompts import render
 from marrow.schemas.chunk import ChunkRecord
 from marrow.schemas.graph import (
@@ -71,6 +72,11 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
     caller = LLMCaller(working_dir, config)
     book_slug = chunks[0].book_slug if chunks else "unknown"
 
+    # Progress: per-chunk extraction first; community-summary count extends the
+    # bar once we know it after clustering.
+    progress = progress_current()
+    progress.stage_start(STAGE_NAME, total=max(1, len(chunks)), unit="chunk")
+
     # Per-chunk extraction.
     per_chunk_entities: dict[UUID, list[ExtractedEntity]] = {}
     per_chunk_relationships: dict[UUID, list[ExtractedRelationship]] = {}
@@ -86,6 +92,7 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
                 error=str(e),
             )
             failed_chunks.append(chunk.chunk_uuid)
+            progress.stage_advance(1)
             continue
         except Exception as e:  # isolate per-chunk crashes
             log.warning(
@@ -95,7 +102,9 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
                 error=str(e),
             )
             failed_chunks.append(chunk.chunk_uuid)
+            progress.stage_advance(1)
             continue
+        progress.stage_advance(1)
 
         per_chunk_entities[chunk.chunk_uuid] = response.entities
         per_chunk_relationships[chunk.chunk_uuid] = response.relationships
@@ -161,6 +170,15 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
     # Community detection.
     graph_obj, community_assignments = _detect_communities(entity_records, relationship_records)
 
+    # Extend the progress bar with one tick per community we'll summarize.
+    non_empty_communities = sum(
+        1
+        for eids in community_assignments.values()
+        if any(e.entity_id in eids for e in entity_records)
+    )
+    if non_empty_communities:
+        progress.stage_extend(non_empty_communities)
+
     # Generate community summaries.
     community_records: list[CommunityRecord] = []
     for community_idx, entity_ids in community_assignments.items():
@@ -199,6 +217,7 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
                 is_orphan_bucket=False,
             )
         )
+        progress.stage_advance(1)
 
     # Coverage audit + orphan bucket.
     covered_chunk_uuids: set[UUID] = set()
