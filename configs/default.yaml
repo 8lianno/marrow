@@ -1,4 +1,6 @@
 # Marrow default configuration. CLI flags > env vars (MARROW_*) > this file > built-in defaults.
+# Host Mode is the default product path. Marrow will use the host agent for all
+# reasoning unless you explicitly switch to `--mode api`.
 mode: host  # host | api
 
 ingest:
@@ -35,6 +37,9 @@ export:
 cost:
   max_per_book: 4.00
 
+# API-mode fallback routes. These are ignored in Host Mode.
+# If you want an explicit API preset, prefer configs/ollama.yaml,
+# configs/anthropic.yaml, configs/gemini.yaml, or configs/openrouter.yaml.
 models:
   claim_extraction:
     provider: ollama

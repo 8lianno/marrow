@@ -16,8 +16,8 @@ traceability to `^uuid` block anchors in Obsidian.
 - **Lossless gate, not vibes.** Every stage that could drop content has an
   explicit audit. A brief that passes didn't just sound complete — it was
   graded against the source and survived.
-- **Local-first by default.** Runs on your machine. Uses Ollama (`qwen3:14b`)
-  out of the box. Zero API keys required. Zero metered billing.
+- **Host-first by default.** Marrow runs inside Claude Code / Codex in Host
+  Mode by default. Zero API keys required. Zero metered billing from Marrow.
 - **Two modes, same output.** Either Marrow calls the LLM itself (`--mode api`,
   supports Anthropic / Gemini / OpenRouter / Ollama), or the host agent
   (Claude Code / Codex) does the reasoning via a file-based task protocol
@@ -320,13 +320,13 @@ works in Claude Code and Codex. $0.00 metered cost.
 ### Run it with an LLM provider (API mode)
 
 ```bash
-# Local Ollama (qwen3:14b on localhost:11434) — default
-marrow run path/to/book.pdf --mode api
+# Local Ollama (qwen3:14b on localhost:11434)
+marrow run path/to/book.pdf --config configs/ollama.yaml
 
 # OpenRouter / Gemini / Anthropic presets
-marrow run path/to/book.pdf --mode api --config configs/openrouter.yaml
-marrow run path/to/book.pdf --mode api --config configs/gemini.yaml
-marrow run path/to/book.pdf --mode api --config configs/anthropic.yaml
+marrow run path/to/book.pdf --config configs/openrouter.yaml
+marrow run path/to/book.pdf --config configs/gemini.yaml
+marrow run path/to/book.pdf --config configs/anthropic.yaml
 
 # Resume after interruption
 marrow run path/to/book.pdf --resume
@@ -344,15 +344,17 @@ Presets in `configs/`:
 
 | File | Purpose |
 |---|---|
-| [`default.yaml`](configs/default.yaml) | Local Ollama everywhere, $0 metered cost |
-| [`cheap.yaml`](configs/cheap.yaml) | Local-only, cost cap $0.50 |
+| [`default.yaml`](configs/default.yaml) | Host Mode default; host agent does all reasoning |
+| [`ollama.yaml`](configs/ollama.yaml) | Explicit local API-mode preset via Ollama |
+| [`cheap.yaml`](configs/cheap.yaml) | Host-first low-cost profile with tighter budget cap |
 | [`openrouter.yaml`](configs/openrouter.yaml) | OpenRouter gateway (needs `OPENROUTER_API_KEY`) |
 | [`gemini.yaml`](configs/gemini.yaml) | Gemini Flash + Pro (needs `GEMINI_API_KEY`) |
 | [`anthropic.yaml`](configs/anthropic.yaml) | Sonnet 4.6 for synthesis + validation (needs `ANTHROPIC_API_KEY`) |
 
 Model routing is per-role. For example, `anthropic.yaml` uses local Ollama for
 the hot per-chunk work (claims + graph) but Sonnet for synthesis + validation
-where quality matters most.
+where quality matters most, and `openrouter.yaml` swaps the hot per-chunk work
+to OpenRouter while keeping Anthropic for the quality-critical stages.
 
 ## Docs
 
@@ -375,7 +377,7 @@ on every result.
 
 **Known gaps:**
 - Tested on tiny synthetic fixtures, not a real 300-page book yet.
-- Default synthesis model (`qwen3:14b` local) is strong for extraction
+- The Ollama API preset (`qwen3:14b`) is strong for extraction
   but verbose for synthesis; `configs/anthropic.yaml` or
   `configs/gemini.yaml` produce cleaner briefs when you need PASS
   verdicts from the lossless gate.

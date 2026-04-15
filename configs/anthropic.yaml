@@ -1,7 +1,7 @@
 # Anthropic-preferred preset: Sonnet 4.6 for synthesis + validation (best brief quality),
 # local ollama for per-chunk work (claim + graph extraction run hundreds of times).
 # Requires: ANTHROPIC_API_KEY env var.
-extends: default.yaml
+extends: ollama.yaml
 
 models:
   synthesis:

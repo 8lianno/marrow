@@ -2,6 +2,8 @@
 # Requires: GEMINI_API_KEY env var.
 extends: default.yaml
 
+mode: api
+
 models:
   claim_extraction:
     provider: gemini

@@ -2,8 +2,9 @@
 
 Pipeline:
 1. Read chunks.jsonl from stage 02 (with embeddings).
-2. For each chunk, call the configured LLM (default: ollama/qwen3:14b) with the
-   `extract_claims.j2` prompt and `ExtractedClaimsResponse` schema.
+2. For each chunk, call the configured LLM route (common API preset:
+   ollama/qwen3:14b) with the `extract_claims.j2` prompt and
+   `ExtractedClaimsResponse` schema.
 3. Single-chunk failures are isolated — the chunk is logged to `failed_chunks`
    and the stage continues (per CLAUDE.md error-handling pattern).
 4. Semantic dedup: cosine similarity of claim-text embeddings, threshold per

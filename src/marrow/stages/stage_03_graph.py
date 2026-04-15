@@ -2,7 +2,8 @@
 
 Pipeline:
 1. Read chunks.jsonl from stage 02.
-2. For each chunk, call the configured LLM (default: ollama/qwen3:14b) with
+2. For each chunk, call the configured LLM route (common API preset:
+   ollama/qwen3:14b) with
    the combined `extract_graph.j2` prompt and `ExtractedGraphResponse` schema.
 3. Merge entities across chunks by normalized canonical_name. Each entity
    accumulates chunk_uuids where it appears. Aliases are unioned.

@@ -41,3 +41,10 @@ def test_cheap_extends_default(tmp_path: Path) -> None:
     assert cfg.mode == "host"
     assert cfg.cost.max_per_book == 0.50  # cheap.yaml override
     assert cfg.chunk.window_tokens == 512  # inherited from default
+
+
+def test_ollama_preset_is_explicit_api_mode() -> None:
+    cfg = load_config(config_path=Path("configs/ollama.yaml"))
+    assert cfg.mode == "api"
+    assert cfg.models.synthesis.provider == "ollama"
+    assert cfg.models.synthesis.model_id == "qwen3:14b"

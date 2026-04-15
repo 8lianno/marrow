@@ -1,6 +1,8 @@
 # Cloud preset: OpenRouter for claims/graph, Anthropic direct for synthesis/validation.
 # Requires: OPENROUTER_API_KEY env var.
-extends: default.yaml
+extends: anthropic.yaml
+
+mode: api
 
 models:
   claim_extraction:
