@@ -66,10 +66,10 @@ def test_evaluate_skip_defaults_false() -> None:
 
 
 def test_monitor_config_defaults() -> None:
-    """US-013: monitor section exists with null input/output and 5s poll default."""
+    """US-013: monitor defaults to cwd-relative ./inbox and ./briefs."""
     cfg = load_config()
-    assert cfg.monitor.input_dir is None
-    assert cfg.monitor.output_dir is None
+    assert cfg.monitor.input_dir == "inbox"
+    assert cfg.monitor.output_dir == "briefs"
     assert cfg.monitor.poll_interval_seconds == 5.0
     assert ".pdf" in cfg.monitor.supported_extensions
 

@@ -130,9 +130,6 @@ def process_one(book_path: Path, cfg: MarrowConfig) -> WatchEvent:
     error, copies artifacts to ``cfg.monitor.output_dir``, and appends to
     ``watch_report.json``.
     """
-    assert cfg.monitor.input_dir and cfg.monitor.output_dir, (
-        "monitor.input_dir and monitor.output_dir must be configured"
-    )
     input_dir = Path(cfg.monitor.input_dir)
     output_dir = Path(cfg.monitor.output_dir)
     slug = book_slug(book_path)
@@ -190,9 +187,6 @@ def run_watch(cfg: MarrowConfig, once: bool = False) -> list[WatchEvent]:
     ``once=True`` processes the current input-dir contents exactly once and
     returns — used by tests and for manual one-shot runs.
     """
-    if not cfg.monitor.input_dir or not cfg.monitor.output_dir:
-        raise MarrowError("monitor.input_dir and monitor.output_dir must be configured")
-
     input_dir = Path(cfg.monitor.input_dir)
     output_dir = Path(cfg.monitor.output_dir)
     input_dir.mkdir(parents=True, exist_ok=True)

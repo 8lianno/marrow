@@ -352,11 +352,17 @@ def submit(
 
 @app.command()
 def watch(
-    input_dir: Path = typer.Option(
-        ..., "--input", exists=False, file_okay=False, help="Folder to monitor for new books"
+    input_dir: Path | None = typer.Option(
+        None,
+        "--input",
+        file_okay=False,
+        help="Folder to monitor. Defaults to ./inbox (created if missing).",
     ),
-    output_dir: Path = typer.Option(
-        ..., "--output", file_okay=False, help="Folder to deliver finished briefs to"
+    output_dir: Path | None = typer.Option(
+        None,
+        "--output",
+        file_okay=False,
+        help="Folder for finished briefs. Defaults to ./briefs (created if missing).",
     ),
     mode: str | None = typer.Option(None, "--mode", help="host | api"),
     config: Path | None = typer.Option(None, "--config", help="Path to YAML config"),
@@ -369,22 +375,32 @@ def watch(
         False, "--once", help="Process current contents once and exit (no polling loop)"
     ),
 ) -> None:
-    """Monitor --input; run the pipeline on dropped books; deliver briefs to --output.
+    """Monitor an input folder; run the pipeline on dropped books; deliver briefs.
 
-    Successful runs land in --output/ and the source moves to --input/processed/.
-    Failed runs move the source to --input/failed/ so the queue keeps flowing.
+    With no flags, watches ./inbox and delivers to ./briefs (both auto-created).
+    Successful runs land in the output folder; the source moves to <input>/processed/.
+    Failed runs move the source to <input>/failed/ so the queue keeps flowing.
     Interrupted runs resume on the next tick. Run one watcher per folder.
     """
     cfg = _resolve_config(config, mode, cost_cap, vault)
-    cfg.monitor.input_dir = str(input_dir)
-    cfg.monitor.output_dir = str(output_dir)
+    if input_dir is not None:
+        cfg.monitor.input_dir = str(input_dir)
+    if output_dir is not None:
+        cfg.monitor.output_dir = str(output_dir)
     if poll_interval is not None:
         cfg.monitor.poll_interval_seconds = poll_interval
 
-    configure_logging(cfg.logging.level, run_log_path=output_dir / "logs" / "watch.jsonl")
+    resolved_input = Path(cfg.monitor.input_dir).resolve()
+    resolved_output = Path(cfg.monitor.output_dir).resolve()
+    resolved_input.mkdir(parents=True, exist_ok=True)
+    resolved_output.mkdir(parents=True, exist_ok=True)
+    cfg.monitor.input_dir = str(resolved_input)
+    cfg.monitor.output_dir = str(resolved_output)
+
+    configure_logging(cfg.logging.level, run_log_path=resolved_output / "logs" / "watch.jsonl")
     console.print(
-        f"[green]marrow watch[/green] input=[cyan]{input_dir}[/cyan] "
-        f"output=[cyan]{output_dir}[/cyan] once={once}"
+        f"[green]marrow watch[/green] input=[cyan]{resolved_input}[/cyan] "
+        f"output=[cyan]{resolved_output}[/cyan] once={once}"
     )
     try:
         events = run_watch(cfg, once=once)

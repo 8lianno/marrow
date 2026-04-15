@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from marrow.config import MarrowConfig, load_config
-from marrow.errors import MarrowError, StageError
+from marrow.errors import StageError
 from marrow.io import read_json
 from marrow.orchestrator import working_dir_for
 from marrow.schemas.run import RunManifest
@@ -293,7 +293,14 @@ def test_run_watch_skips_already_complete_run(tmp_path: Path, monkeypatch) -> No
 # ---- Configuration ----
 
 
-def test_run_watch_requires_input_and_output(tmp_path: Path) -> None:
+def test_run_watch_uses_cwd_relative_defaults(tmp_path: Path, monkeypatch) -> None:
+    """With no --input/--output, watcher auto-creates ./inbox and ./briefs in cwd."""
+    monkeypatch.chdir(tmp_path)
     cfg = load_config(overrides={"mode": "api", "runs_dir": str(tmp_path / "runs")})
-    with pytest.raises(MarrowError):
-        run_watch(cfg, once=True)
+    assert cfg.monitor.input_dir == "inbox"
+    assert cfg.monitor.output_dir == "briefs"
+
+    events = run_watch(cfg, once=True)
+    assert events == []
+    assert (tmp_path / "inbox").is_dir()
+    assert (tmp_path / "briefs").is_dir()

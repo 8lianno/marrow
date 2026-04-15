@@ -101,8 +101,8 @@ class LoggingConfig(BaseModel):
 
 
 class MonitorConfig(BaseModel):
-    input_dir: str | None = None
-    output_dir: str | None = None
+    input_dir: str = "inbox"
+    output_dir: str = "briefs"
     poll_interval_seconds: float = 5.0
     supported_extensions: list[str] = Field(default_factory=lambda: [".pdf", ".epub"])
 

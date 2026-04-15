@@ -25,6 +25,11 @@ coverage.xml
 runs/
 !runs/.gitkeep
 
+inbox/
+!inbox/.gitkeep
+briefs/
+!briefs/.gitkeep
+
 tests/cassettes/**/.cache/
 
 .DS_Store
