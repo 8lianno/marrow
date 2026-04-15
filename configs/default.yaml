@@ -60,9 +60,14 @@ models:
 host:
   task_dir: host_tasks
   result_dir: host_results
+  claim_dir: host_claims
   poll_interval_seconds: 1.0
+  task_timeout_seconds: 3600.0
   task_max_input_tokens: 8000
   task_max_output_tokens: 4000
+  default_batch_size: 4
+  claim_ttl_seconds: 1800
+  allow_stub_fallback: false
 
 logging:
   level: INFO

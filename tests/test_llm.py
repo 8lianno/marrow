@@ -9,7 +9,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
+import pytest
+
 from marrow.config import load_config
+from marrow.errors import LLMError
 from marrow.llm import LLMCaller
 
 
@@ -78,3 +81,39 @@ def test_host_mode_writes_task_and_completes_when_result_arrives(tmp_path: Path)
     assert len(result_files) == 1
     # Task ID parses as UUID.
     UUID(task_files[0].stem)
+
+
+def test_host_mode_timeout_raises_without_stub_fallback(tmp_path: Path) -> None:
+    cfg = load_config(
+        overrides={
+            "mode": "host",
+            "runs_dir": str(tmp_path),
+            "host": {"poll_interval_seconds": 0.01, "task_timeout_seconds": 0.05},
+        }
+    )
+    working_dir = tmp_path / "wd"
+    working_dir.mkdir()
+    caller = LLMCaller(working_dir, cfg)
+
+    with pytest.raises(LLMError, match="Timed out waiting for host result"):
+        caller.call(stage="test", prompt="please summarize", model_role="synthesis")
+
+
+def test_host_mode_timeout_can_stub_when_explicitly_enabled(tmp_path: Path) -> None:
+    cfg = load_config(
+        overrides={
+            "mode": "host",
+            "runs_dir": str(tmp_path),
+            "host": {
+                "poll_interval_seconds": 0.01,
+                "task_timeout_seconds": 0.05,
+                "allow_stub_fallback": True,
+            },
+        }
+    )
+    working_dir = tmp_path / "wd"
+    working_dir.mkdir()
+    caller = LLMCaller(working_dir, cfg)
+
+    out = caller.call(stage="test", prompt="please summarize", model_role="synthesis")
+    assert isinstance(out, str)

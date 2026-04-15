@@ -85,9 +85,14 @@ class ModelsConfig(BaseModel):
 class HostConfig(BaseModel):
     task_dir: str = "host_tasks"
     result_dir: str = "host_results"
+    claim_dir: str = "host_claims"
     poll_interval_seconds: float = 1.0
+    task_timeout_seconds: float = 3600.0
     task_max_input_tokens: int = 8000
     task_max_output_tokens: int = 4000
+    default_batch_size: int = 4
+    claim_ttl_seconds: int = 1800
+    allow_stub_fallback: bool = False
 
 
 class LoggingConfig(BaseModel):

@@ -13,6 +13,7 @@ from typing import Protocol
 
 from marrow.config import MarrowConfig
 from marrow.errors import InputNotFound, ModeLockViolation, StageError
+from marrow.host import detect_host_info
 from marrow.io import read_json, write_json
 from marrow.logging import get_logger
 from marrow.schemas.run import RunManifest, StageResult
@@ -91,6 +92,7 @@ def _write_initial_manifest(
 ) -> RunManifest:
     from marrow import __version__
 
+    host_info = detect_host_info() if config.mode == "host" else None
     manifest = RunManifest(
         book_slug=book_slug(book_path),
         book_path=str(book_path.resolve()),
@@ -98,6 +100,7 @@ def _write_initial_manifest(
         started_at=datetime.now(UTC),
         status="in_progress",
         config=config.model_dump(by_alias=True),
+        host_info=host_info,
         marrow_version=__version__,
     )
     write_json(working_dir / "manifest.json", manifest)
@@ -158,6 +161,15 @@ def run_pipeline(
 
     working_dir.mkdir(parents=True, exist_ok=True)
     _enforce_mode_lock(working_dir, config, force=force)
+
+    if config.mode == "host":
+        host_info = detect_host_info()
+        log.info(
+            "host_mode_active",
+            message="Host Mode active — API keys ignored. Reasoning will run inside the host agent.",
+            host_environment=host_info.environment,
+            session_id=host_info.session_id,
+        )
 
     stages = discover_stages()
     if not stages:

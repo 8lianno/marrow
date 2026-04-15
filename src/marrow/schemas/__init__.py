@@ -39,8 +39,10 @@ from marrow.schemas.graph import (
 )
 from marrow.schemas.run import (
     CostBreakdown,
+    HostInfo,
     HostResult,
     HostTask,
+    HostTaskClaim,
     RunManifest,
     StageResult,
 )
@@ -69,8 +71,10 @@ __all__ = [
     "FactVerification",
     "GeneratedQuestion",
     "GeneratedQuiz",
+    "HostInfo",
     "HostResult",
     "HostTask",
+    "HostTaskClaim",
     "ParagraphNode",
     "QuizAnswerResponse",
     "QuizGrade",

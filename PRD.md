@@ -120,7 +120,7 @@ Marrow runs by default **inside the user's existing Claude Code or Codex session
 |-------|--------------|----------|--------|
 | M1 — Foundations | Repo scaffold, config schema, Docling ingest (US-001), source-export (US-008-A) | Week 1 | End W1 |
 | M2 — Retrieval Spine | Late chunking (US-002), GraphRAG indexing (US-003) | Week 2 | End W2 |
-| M3 — Host Mode Plumbing | Task/result protocol, `marrow next` command, skill file v0 (F0) | Week 2.5 | Mid W3 |
+| M3 — Host Mode Plumbing | Task/result protocol, `marrow next` command, host playbooks v0 (F0) | Week 2.5 | Mid W3 |
 | M4 — Synthesis Loop | Claim extraction (US-004), hierarchical merge (US-005), quiz validation (US-006) — both Host and API paths | Week 3–4 | End W4 |
 | M5 — Evaluation & Export | BooookScore + FActScore + HAMLET harness (US-007), Obsidian export with citations (US-008), CLI hardening (US-009) | Week 4 | End W4 |
 | M6 — Hardening & Dogfood | Cost telemetry, Host Mode resume across sessions, dogfood on 5 reference books, tune K-communities and chunk-overlap, record demo screencast | Week 5 | End W5 |
@@ -174,7 +174,7 @@ Marrow runs by default **inside the user's existing Claude Code or Codex session
 ### 3) Business Context
 - **Problem / Opportunity:** Forcing users to pay metered API fees on top of an existing $200/month Claude Code Max subscription is hostile to the user's wallet and ideologically wrong. It also adds API-key management friction that scares away contributors and creates a leak vector.
 - **Goal:** Marrow runs by default inside Claude Code or Codex with zero API keys, zero metered cost, and full reasoning visibility.
-- **Scope (In):** File-based task/result protocol; `marrow next` orchestration command; skill file at `marrow-skill/SKILL.md`; resumability across host sessions; mode lock; estimated host-token telemetry.
+- **Scope (In):** File-based task/result protocol; `marrow next` orchestration command; host playbooks at `skills/claude-code/marrow/SKILL.md` and `skills/codex/marrow/SKILL.md`; resumability across host sessions; mode lock; estimated host-token telemetry.
 - **Out of Scope:** MCP server interface (v1.1); enforcing that the host is a paid subscription; integration with billing dashboards.
 - **Success Metrics:**
   - $0.00 in metered API fees on a successful Host Mode run
@@ -187,9 +187,9 @@ Marrow runs by default **inside the user's existing Claude Code or Codex session
 
 **Scenario: First-Time Host Mode Run with No API Key**
 **Given** the user has `marrow` installed and no `ANTHROPIC_API_KEY` set
-**And** they are in an active Claude Code session in a directory containing `book.pdf`
+**And** they are in an active Claude Code or Codex session in a directory containing `book.pdf`
 **When** they type "process book.pdf with marrow"
-**Then** the host agent reads `marrow-skill/SKILL.md`
+**Then** the host agent reads the appropriate Marrow host playbook
 **And** runs `marrow run book.pdf --mode host` (the default)
 **And** loops on `marrow next <slug>` to receive task batches
 **And** performs reasoning for each task in its own context window
@@ -206,7 +206,7 @@ Marrow runs by default **inside the user's existing Claude Code or Codex session
 
 **Scenario: Resume Across Host Sessions**
 **Given** a Host Mode run was interrupted at stage 05_synthesize after completing 7 of 12 chapter tasks
-**When** the user opens a fresh Claude Code session two days later in the same directory
+**When** the user opens a fresh Claude Code or Codex session two days later in the same directory
 **And** says "continue the marrow run for the-book"
 **Then** the host agent runs `marrow status`, identifies the in-progress run
 **And** runs `marrow next the-book`, receives the remaining 5 chapter tasks
@@ -229,17 +229,16 @@ Marrow runs by default **inside the user's existing Claude Code or Codex session
 
 **Scenario: Estimated Cost Reporting**
 **Given** a Host Mode run has completed
-**When** the user runs `marrow cost the-book`
-**Then** the system displays the estimated host token usage by stage
+**When** the user inspects the run manifest and token ledger
+**Then** the system displays estimated host token usage by stage
 **And** clearly labels the values as "estimated"
-**And** links the user to their Claude Code billing dashboard for actuals
 
 **Scenario: Detection of Host Environment**
 **Given** the user is running inside a Claude Code session
 **When** Marrow starts a Host Mode run
 **Then** the system detects the host environment via the `CLAUDECODE` environment variable
-**And** records `host_environment: claude_code` in the run manifest
-**And** loads any Claude-Code-specific tips from the skill file
+**And** records `host_environment: claude-code` in the run manifest
+**And** loads any host-specific tips from the relevant playbook
 
 **Scenario: Unattended Batch Run Falls Back to API Mode**
 **Given** the user wants to process 10 books overnight without sitting in front of Claude Code
@@ -251,7 +250,7 @@ Marrow runs by default **inside the user's existing Claude Code or Codex session
 ### 5) Functional Requirements
 See `HOST_MODE.md` §5 for the complete FR-H01 through FR-H10 list. Key requirements:
 - **FR-H01:** No API key required for Host Mode
-- **FR-H02:** Skill file drives the host agent
+- **FR-H02:** Host playbook drives the host agent
 - **FR-H03:** File-based task/result protocol with Pydantic schema validation
 - **FR-H04:** `marrow next <slug>` is the host agent's loop pivot
 - **FR-H05:** Per-task hard cap: 8000 input tokens / 4000 output tokens
@@ -262,7 +261,7 @@ See `HOST_MODE.md` §5 for the complete FR-H01 through FR-H10 list. Key requirem
 - **FR-H10:** Graceful degradation to API Mode when explicitly requested
 
 ### 6) UX / UI Requirements
-- The skill file must read like a runbook a senior engineer could follow without prior context.
+- The host playbook must read like a runbook a senior engineer could follow without prior context.
 - Task files must be human-readable JSON when opened in a text editor.
 - `marrow next` output must be a single JSON object the host agent can parse without ambiguity.
 - The CLI banner at the start of every run must say which mode is active.
@@ -270,7 +269,7 @@ See `HOST_MODE.md` §5 for the complete FR-H01 through FR-H10 list. Key requirem
 ### 7) Edge Cases
 - Host agent rate-limits mid-run → user resumes after waiting
 - Host agent refuses a task on safety grounds → log as `failed_task`, continue, report in summary
-- Skill file too large for some host loaders → modular sub-files loaded on demand
+- Host playbook too large for some host loaders → modular sub-files loaded on demand
 - User has both `CLAUDECODE` and `CODEX_SESSION_ID` set → log warning, proceed with first match
 - Two host agents try to run `marrow next` on the same slug concurrently → file lock prevents corruption
 

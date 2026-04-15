@@ -11,6 +11,9 @@ def test_defaults_load() -> None:
     cfg = load_config()
     assert cfg.mode == "host"
     assert cfg.cost.max_per_book == 4.00
+    assert cfg.host.default_batch_size == 4
+    assert cfg.host.task_timeout_seconds == 3600.0
+    assert cfg.host.allow_stub_fallback is False
 
 
 def test_overrides_apply() -> None:

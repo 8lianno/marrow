@@ -13,6 +13,7 @@ class MarrowExitCode(IntEnum):
     LLM_ERROR = 5
     INPUT_NOT_FOUND = 6
     MODE_LOCK_VIOLATION = 7
+    INVALID_INPUT = 8
     UNKNOWN = 99
 
 

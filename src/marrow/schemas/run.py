@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 StageStatus = Literal["success", "warning", "failed"]
 RunStatus = Literal["in_progress", "success", "failed", "partial"]
 RunMode = Literal["host", "api"]
+HostEnvironment = Literal["claude-code", "codex", "cursor", "aider", "generic"]
 
 
 class StageResult(BaseModel):
@@ -36,6 +37,12 @@ class CostBreakdown(BaseModel):
     total_tokens_out: int = 0
 
 
+class HostInfo(BaseModel):
+    environment: HostEnvironment
+    session_id: str | None = None
+    supports_parallel_claims: bool = True
+
+
 class RunManifest(BaseModel):
     book_slug: str
     book_path: str
@@ -45,6 +52,7 @@ class RunManifest(BaseModel):
     duration_seconds: float | None = None
     status: RunStatus
     config: dict[str, Any]  # serialized MarrowConfig (avoids forward-ref cycle)
+    host_info: HostInfo | None = None
     stage_results: list[StageResult] = Field(default_factory=list)
     cost_breakdown: CostBreakdown = Field(default_factory=CostBreakdown)
     final_brief_path: str | None = None
@@ -67,9 +75,12 @@ class HostTask(BaseModel):
     model_role: str
     prompt: str
     response_schema: dict[str, Any] | None = None
+    response_schema_name: str | None = None
     chunk_uuids: list[UUID] = Field(default_factory=list)
     max_input_tokens: int
     max_output_tokens: int
+    parallelizable: bool = True
+    quality_hints: list[str] = Field(default_factory=list)
     created_at: datetime
 
 
@@ -78,4 +89,15 @@ class HostResult(BaseModel):
     response: Any
     estimated_tokens_in: int = 0
     estimated_tokens_out: int = 0
+    model_id: str | None = None
+    worker_id: str | None = None
+    host_environment: HostEnvironment | None = None
     completed_at: datetime
+
+
+class HostTaskClaim(BaseModel):
+    task_id: UUID
+    claimer: str
+    host_environment: HostEnvironment
+    claimed_at: datetime
+    lease_expires_at: datetime

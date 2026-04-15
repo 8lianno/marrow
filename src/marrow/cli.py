@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -12,10 +13,19 @@ from rich.table import Table
 from marrow import __version__
 from marrow.config import MarrowConfig, load_config
 from marrow.errors import MarrowError, MarrowExitCode
+from marrow.host import (
+    claim_task_batch,
+    claimable_task_paths,
+    detect_host_info,
+    recommended_parallelism,
+    submit_host_result,
+    task_counts,
+    task_payload,
+)
 from marrow.io import read_json
 from marrow.logging import configure as configure_logging
 from marrow.orchestrator import discover_stages, is_complete, run_pipeline, working_dir_for
-from marrow.schemas.run import RunManifest
+from marrow.schemas.run import HostResult, HostTask, RunManifest
 from marrow.slug import book_slug, slugify
 
 app = typer.Typer(
@@ -155,23 +165,154 @@ def clean(
 def next_task(
     book: str = typer.Argument(..., help="Book slug or path"),
     config: Path | None = typer.Option(None, "--config"),
+    limit: int | None = typer.Option(None, "--limit", min=1, help="Max tasks to return/claim"),
+    claimer: str | None = typer.Option(None, "--claimer", help="Logical worker/agent name"),
+    claim: bool = typer.Option(True, "--claim/--no-claim", help="Claim tasks for parallel workers"),
 ) -> None:
-    """Print the next pending host-mode task (host agent's loop pivot)."""
+    """Return the next claimable host-mode task batch as JSON."""
     cfg = load_config(config_path=config)
     slug = _book_to_slug(book)
     working_dir = Path(cfg.runs_dir) / slug
     task_dir = working_dir / cfg.host.task_dir
-    result_dir = working_dir / cfg.host.result_dir
+    manifest = _read_manifest_if_present(working_dir)
+    host_info = manifest.host_info if manifest and manifest.host_info else detect_host_info()
+    batch_limit = limit or cfg.host.default_batch_size
 
+    if not working_dir.exists():
+        console.print(f"[yellow]No run found for slug:[/yellow] {slug}")
+        raise typer.Exit(code=int(MarrowExitCode.INPUT_NOT_FOUND))
     if not task_dir.exists():
-        console.print("[yellow]No host_tasks/ directory yet — has the run started?[/yellow]")
+        _print_json(
+            {
+                "book_slug": slug,
+                "status": "starting" if manifest else "not_found",
+                "host_environment": host_info.environment,
+                "counts": task_counts(working_dir, cfg.host),
+                "tasks": [],
+            }
+        )
+        return
+
+    claimable = claimable_task_paths(working_dir, cfg.host)
+    if not claimable:
+        _print_json(
+            {
+                "book_slug": slug,
+                "status": "complete" if (working_dir / "06b_export" / "_complete").exists() else "waiting",
+                "host_environment": host_info.environment,
+                "counts": task_counts(working_dir, cfg.host),
+                "tasks": [],
+            }
+        )
+        return
+
+    first_task = read_json(claimable[0], HostTask)
+    selected_stage = first_task.stage
+    claim_name = claimer or f"{host_info.environment}:{host_info.session_id or 'session'}"
+
+    if claim:
+        claimed = claim_task_batch(
+            working_dir,
+            cfg.host,
+            limit=batch_limit,
+            claimer=claim_name,
+            host_info=host_info,
+            stage=selected_stage,
+        )
+        selected_tasks = claimed
+    else:
+        selected_tasks = [
+            (read_json(task_path, HostTask), task_path)
+            for task_path in claimable
+            if read_json(task_path, HostTask).stage == selected_stage
+        ][:batch_limit]
+
+    payload = {
+        "book_slug": slug,
+        "status": "awaiting_host",
+        "host_environment": host_info.environment,
+        "stage": selected_stage,
+        "recommended_parallelism": recommended_parallelism(
+            cfg.host, selected_stage, len(selected_tasks)
+        ),
+        "counts": task_counts(working_dir, cfg.host),
+        "claimer": claim_name if claim else None,
+        "tasks": [
+            task_payload(working_dir, cfg.host, task=task, task_path=task_path)
+            for task, task_path in selected_tasks
+        ],
+    }
+    _print_json(payload)
+
+
+@app.command()
+def tasks(
+    book: str = typer.Argument(..., help="Book slug or path"),
+    config: Path | None = typer.Option(None, "--config"),
+    limit: int = typer.Option(50, "--limit", min=1, help="Max tasks to include in output"),
+) -> None:
+    """List current host-mode queue state as JSON."""
+    cfg = load_config(config_path=config)
+    slug = _book_to_slug(book)
+    working_dir = Path(cfg.runs_dir) / slug
+    if not working_dir.exists():
+        console.print(f"[yellow]No run found for slug:[/yellow] {slug}")
         raise typer.Exit(code=int(MarrowExitCode.INPUT_NOT_FOUND))
 
-    pending = sorted(p for p in task_dir.glob("*.json") if not (result_dir / p.name).exists())
-    if not pending:
-        console.print("[green]No pending tasks.[/green]")
-        return
-    console.print_json(pending[0].read_text(encoding="utf-8"))
+    pending_paths = claimable_task_paths(working_dir, cfg.host)[:limit]
+    payload = {
+        "book_slug": slug,
+        "status": "complete" if (working_dir / "06b_export" / "_complete").exists() else "in_progress",
+        "counts": task_counts(working_dir, cfg.host),
+        "tasks": [
+            task_payload(
+                working_dir,
+                cfg.host,
+                task=read_json(task_path, HostTask),
+                task_path=task_path,
+            )
+            for task_path in pending_paths
+        ],
+    }
+    _print_json(payload)
+
+
+@app.command()
+def submit(
+    book: str = typer.Argument(..., help="Book slug or path"),
+    task_id: str = typer.Argument(..., help="Task UUID"),
+    result_path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
+    config: Path | None = typer.Option(None, "--config"),
+) -> None:
+    """Submit a validated host result file for a specific task."""
+    cfg = load_config(config_path=config)
+    slug = _book_to_slug(book)
+    working_dir = Path(cfg.runs_dir) / slug
+    if not working_dir.exists():
+        console.print(f"[yellow]No run found for slug:[/yellow] {slug}")
+        raise typer.Exit(code=int(MarrowExitCode.INPUT_NOT_FOUND))
+
+    host_result = read_json(result_path, HostResult)
+    if str(host_result.task_id) != task_id:
+        console.print(
+            f"[red]Task/result mismatch:[/red] result contains {host_result.task_id}, expected {task_id}"
+        )
+        raise typer.Exit(code=int(MarrowExitCode.INVALID_INPUT))
+
+    stored_path = submit_host_result(
+        working_dir,
+        cfg.host,
+        task_id=task_id,
+        host_result=host_result,
+    )
+    _print_json(
+        {
+            "status": "submitted",
+            "book_slug": slug,
+            "task_id": task_id,
+            "stored_result_path": str(stored_path),
+        }
+    )
 
 
 @app.command()
@@ -213,6 +354,17 @@ def _print_summary(manifest: RunManifest) -> None:
     )
     if manifest.final_brief_path:
         console.print(f"Brief: [cyan]{manifest.final_brief_path}[/cyan]")
+
+
+def _print_json(payload: dict[str, object]) -> None:
+    typer.echo(json.dumps(payload, sort_keys=True))
+
+
+def _read_manifest_if_present(working_dir: Path) -> RunManifest | None:
+    manifest_path = working_dir / "manifest.json"
+    if not manifest_path.exists():
+        return None
+    return read_json(manifest_path, RunManifest)
 
 
 if __name__ == "__main__":

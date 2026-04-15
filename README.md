@@ -299,19 +299,23 @@ uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
 ```
 
-### Run it inside Claude Code (host mode, zero API keys)
+### Run it inside a host agent (host mode, zero API keys)
 
 ```bash
-# Install the skill once:
+# Claude Code: install the skill once
 ln -s "$(pwd)/skills/claude-code/marrow" ~/.claude/skills/marrow
 
 # Then in any Claude Code session:
 /marrow /path/to/book.pdf
+
+# Codex: use the Codex playbook in this repo
+cat skills/codex/marrow/SKILL.md
 ```
 
-Claude Code launches Marrow in the background, then processes each task file
-Marrow emits (graph extraction, claim extraction, synthesis, quiz, grading,
-coherence, fact verification) using your session tokens. $0.00 metered cost.
+In host mode, the host agent launches Marrow, claims batches of work via
+`marrow next`, delegates independent tasks to helper agents when appropriate,
+and submits `HostResult` JSON back with `marrow submit`. The same task protocol
+works in Claude Code and Codex. $0.00 metered cost.
 
 ### Run it with an LLM provider (API mode)
 

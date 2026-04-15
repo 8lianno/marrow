@@ -1,6 +1,6 @@
 ---
 name: marrow
-description: Run Marrow's lossless book-to-brief pipeline inside Claude Code. You become the reasoning engine — Marrow writes task files, you answer them, no API keys needed. Invoke with `/marrow <book-path>` or `/marrow <book-slug>` to resume.
+description: Run Marrow's lossless book-to-brief pipeline in host mode. You become the reasoning engine — Marrow writes task files, you answer them, no API keys needed. Invoke with `/marrow <book-path>` or `/marrow <book-slug>` to resume.
 ---
 
 # Marrow Host-Mode Skill
@@ -34,11 +34,17 @@ Marrow's stages 03/04/05/05b/06a each need LLM reasoning. In host mode, instead 
 
 3. **Enter the task loop.** Repeat until Marrow's background process exits:
 
-   a. Scan `runs/<slug>/host_tasks/` for `*.json` files whose matching `runs/<slug>/host_results/<same-name>.json` does **not** exist. Pick the oldest (by filename / mtime).
+   a. Claim a batch from the active stage:
+      ```bash
+      marrow next "<slug>" --limit 4 --claimer claude-parent
+      ```
+      The JSON response includes a `recommended_parallelism` and `tasks[]`, each with `task_path`, `result_path`, `response_schema_name`, and `quality_hints`.
 
-   b. If nothing pending: wait 2 seconds, re-scan. After 3 empty scans in a row, check if the background process is still alive. If it has exited, break the loop.
+   b. If the response says `status: "waiting"`: wait 2 seconds, then repeat. If it says `status: "complete"`, break the loop.
 
-   c. Read the task JSON with the `Read` tool. It has this shape:
+   c. For extraction- and validation-heavy stages (`03_graph`, `04_claims`, `05b_validate`, `06a_evaluate`), you may dispatch up to `recommended_parallelism` helper agents, but **each helper gets exactly one claimed task**. Never split one claimed task across multiple helpers.
+
+   d. Read the task JSON with the `Read` tool. It has this shape:
       ```json
       {
         "task_id": "<uuid>",
@@ -46,29 +52,38 @@ Marrow's stages 03/04/05/05b/06a each need LLM reasoning. In host mode, instead 
         "model_role": "claim_extraction",
         "prompt": "<the full instructions you need>",
         "response_schema": { ... Pydantic JSON schema ... },
+        "response_schema_name": "ExtractedClaimsResponse",
         "chunk_uuids": ["<uuid>", ...],
         "max_input_tokens": 8000,
         "max_output_tokens": 4000,
+        "quality_hints": ["Read the entire prompt", "..."],
         "created_at": "<iso>"
       }
       ```
 
-   d. **Reason about the prompt.** The prompt field contains a fully-rendered template with the rules, the source text, and the required JSON output shape already described. Follow it exactly — it is the single source of truth for what you should produce.
+   e. **Reason about the prompt.** The prompt field contains a fully-rendered template with the rules, the source text, and the required JSON output shape already described. Follow it exactly. Read the entire prompt and every evidence block before drafting. If multiple evidence boxes or candidate facts appear, compare all of them before finalizing.
 
-   e. **Construct the response.** The `response_schema` is the JSON Schema Pydantic will validate against. Match it field-for-field. If the schema has `"additionalProperties": false`, do not invent keys. Types matter: `float` means JSON number, `bool` means `true`/`false` (not strings), UUIDs are hyphenated 36-char strings.
+   f. **Construct the response.** The `response_schema` is the JSON Schema Pydantic will validate against. Match it field-for-field. If the schema has `"additionalProperties": false`, do not invent keys. Types matter: `float` means JSON number, `bool` means `true`/`false` (not strings), UUIDs are hyphenated 36-char strings.
 
-   f. **Write the result** with the `Write` tool to `runs/<slug>/host_results/<task-id>.json`:
+   g. **Write a temporary result** with the `Write` tool:
       ```json
       {
         "task_id": "<same uuid as the task>",
         "response": <your answer — either the object matching response_schema, or a plain string if no schema>,
         "estimated_tokens_in": <rough: len(prompt.split())>,
         "estimated_tokens_out": <rough: len(your_response_serialized.split())>,
+        "model_id": "claude-host-agent",
+        "worker_id": "claude-parent-or-helper-name",
+        "host_environment": "claude-code",
         "completed_at": "<iso-utc-now>"
       }
       ```
+      Then submit it:
+      ```bash
+      marrow submit "<slug>" "<task-id>" /tmp/<task-id>.json
+      ```
 
-   g. Loop to (a).
+   h. Loop to (a).
 
 4. **On completion**: run `marrow status <slug>` and show the user the final table. The brief is at `runs/<slug>/06b_export/<slug>_Brief.md`, the evaluation at `<slug>_Evaluation.md`.
 
@@ -95,10 +110,9 @@ Every task's `prompt` field has detailed instructions. This is a quick map so yo
 
 ## When to stop
 
-Stop the loop when all three are true:
-1. `runs/<slug>/host_tasks/` has no files without matching results.
-2. The background `marrow run` process has exited (check via the Bash task id).
-3. `runs/<slug>/06b_export/_complete` exists.
+Stop the loop when both are true:
+1. `marrow next <slug>` returns `status: "complete"`.
+2. `runs/<slug>/06b_export/_complete` exists.
 
 Then report the final paths to the user.
 

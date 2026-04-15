@@ -13,7 +13,10 @@ from marrow.orchestrator import run_pipeline, working_dir_for
 
 
 def _run_in_mode(synthetic_pdf: Path, runs_dir: Path, mode: str) -> Path:
-    config = load_config(overrides={"mode": mode, "runs_dir": str(runs_dir)})
+    overrides: dict[str, object] = {"mode": mode, "runs_dir": str(runs_dir)}
+    if mode == "host":
+        overrides["host"] = {"allow_stub_fallback": True}
+    config = load_config(overrides=overrides)
     manifest = run_pipeline(synthetic_pdf, config, force=True)
     assert manifest.status in ("success", "partial"), f"mode={mode} failed: {manifest.status}"
     return working_dir_for(config, synthetic_pdf)

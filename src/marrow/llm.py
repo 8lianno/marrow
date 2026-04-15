@@ -26,6 +26,7 @@ from pydantic import BaseModel
 
 from marrow.config import MarrowConfig
 from marrow.errors import BudgetExceeded, LLMError
+from marrow.host import quality_hints_for
 from marrow.io import write_json
 from marrow.logging import get_logger
 from marrow.schemas.run import HostResult, HostTask
@@ -199,16 +200,19 @@ class LLMCaller:
             model_role=model_role,
             prompt=prompt,
             response_schema=response_schema.model_json_schema() if response_schema else None,
+            response_schema_name=response_schema.__name__ if response_schema else None,
             chunk_uuids=chunk_uuids,
             max_input_tokens=self.config.host.task_max_input_tokens,
             max_output_tokens=self.config.host.task_max_output_tokens,
+            parallelizable=True,
+            quality_hints=quality_hints_for(stage, model_role),
             created_at=datetime.now(UTC),
         )
         write_json(task_dir / f"{task_id}.json", task)
         log.info("host_task_written", task_id=str(task_id), stage=stage, model_role=model_role)
 
         result_path = result_dir / f"{task_id}.json"
-        deadline = time.time() + 60 * 60  # 1 hour soft limit per task
+        deadline = time.time() + self.config.host.task_timeout_seconds
         while time.time() < deadline:
             if result_path.exists():
                 raw = json.loads(result_path.read_text(encoding="utf-8"))
@@ -216,7 +220,7 @@ class LLMCaller:
                 self.ledger.record_call(
                     stage=stage,
                     model_role=model_role,
-                    model_id="host-agent",
+                    model_id=result.model_id or f"{result.host_environment or 'host'}-agent",
                     provider="host",
                     tokens_in=result.estimated_tokens_in,
                     tokens_out=result.estimated_tokens_out,
@@ -232,7 +236,13 @@ class LLMCaller:
                 return self._validate(response_text, response_schema)
             time.sleep(self.config.host.poll_interval_seconds)
 
-        # Stub fallback for tests/CI: if no host agent ever responds, synthesize a stub.
+        if not self.config.host.allow_stub_fallback:
+            raise LLMError(
+                f"Timed out waiting for host result for task {task_id}. "
+                "Use `marrow next` to claim work and `marrow submit` to submit results."
+            )
+
+        # Stub fallback is test-only. It must be explicitly enabled in config.
         log.warning("host_task_timeout_falling_back_to_stub", task_id=str(task_id))
         response_text = self._stub_response(prompt, response_schema)
         self.ledger.record_call(

@@ -15,7 +15,7 @@ The default pipeline in `PRD.md` assumes Marrow holds an Anthropic API key and c
 2. **Key management friction.** Local-first power users hate stuffing API keys into env files. Every `ANTHROPIC_API_KEY=sk-...` is a leak vector and a setup step that scares away contributors.
 3. **Lost agency.** When Marrow makes its own LLM calls, the user can't intervene, redirect, or steer the synthesis. The reasoning happens behind a curtain. In Host Mode, the user *watches* the host agent reason and can intercept at any stage.
 
-The fix is to **invert the orchestration**: instead of Marrow being the boss that calls the LLM as a service, **the host agent (Claude Code or Codex) becomes the boss that calls Marrow as a toolkit**. The host agent does the reasoning. Marrow handles the deterministic plumbing — parsing, chunking, embedding, storage, evaluation, export.
+The fix is to **invert the orchestration**: instead of Marrow being the boss that calls the LLM as a service, **the host agent (Claude Code, Codex, Cursor, Aider) becomes the boss that calls Marrow as a toolkit**. The host agent does the reasoning. Marrow handles the deterministic plumbing — parsing, chunking, embedding, storage, evaluation, export.
 
 This pattern is established. Coding agents like Serena run inside Claude Code and consume the host's tokens. MCP servers like basic-memory expose only deterministic tools and let the host do the thinking. Marrow's Host Mode follows the same playbook: **Marrow is a toolkit that an agent drives, not a black box that calls an LLM behind the user's back**.
 
@@ -60,19 +60,19 @@ user → marrow run → orchestrator → stage → marrow.llm.call() → Anthrop
 In Host Mode, the call graph is:
 
 ```
-user → host agent (Claude Code) → reads marrow-skill/SKILL.md
-                                ↓
-                                follows playbook step-by-step
-                                ↓
-                                runs `marrow <subcommand>` for deterministic work
-                                                                ↓
-                                                                writes JSONL artifacts
-                                ↓
-                                does the LLM reasoning IN ITS OWN HEAD
-                                ↓
-                                writes the result to disk via `marrow <subcommand> ingest-result`
-                                ↓
-                                proceeds to the next playbook step
+user → host agent (Claude Code / Codex) → reads the Marrow host playbook
+                                        ↓
+                                        follows playbook step-by-step
+                                        ↓
+                                        runs `marrow <subcommand>` for deterministic work
+                                                                        ↓
+                                                                        writes JSONL artifacts
+                                        ↓
+                                        does the LLM reasoning IN ITS OWN HEAD
+                                        ↓
+                                        writes the result to disk or submits it via `marrow submit`
+                                        ↓
+                                        proceeds to the next playbook step
 ```
 
 The host agent is the orchestrator. Marrow is a stateless toolkit. There is no `marrow.llm` module call in Host Mode — that file simply isn't reached.
@@ -99,9 +99,14 @@ When `marrow run --mode host` is invoked, Marrow MUST NOT read `ANTHROPIC_API_KE
 
 If the user accidentally sets an API key, Marrow MUST ignore it in Host Mode and log: `"Host Mode active — API keys ignored. Reasoning will run inside the host agent."`
 
-### FR-H02 — The Skill File Drives the Host Agent
+### FR-H02 — The Host Playbook Drives the Host Agent
 
-Marrow ships a skill file at `marrow-skill/SKILL.md` that the host agent reads on every invocation. The skill is the playbook. It tells the host agent:
+Marrow ships host playbooks in:
+
+- `skills/claude-code/marrow/SKILL.md`
+- `skills/codex/marrow/SKILL.md`
+
+The playbook tells the host agent:
 
 - Which `marrow` subcommands to run, in what order
 - How to read each stage's task files
@@ -109,28 +114,30 @@ Marrow ships a skill file at `marrow-skill/SKILL.md` that the host agent reads o
 - When to ask the user for confirmation
 - How to handle failures and resume
 
-The skill MUST be self-contained — a fresh Claude Code session with no prior context must be able to follow it. The skill is versioned alongside Marrow itself.
+The playbook MUST be self-contained — a fresh host-agent session with no prior context must be able to follow it. It is versioned alongside Marrow itself.
 
 ### FR-H03 — Task / Result Protocol
 
 Every stage that previously made an LLM call now follows this protocol:
 
-1. **Marrow writes a task file** to `runs/<slug>/<stage>/tasks/<task_id>.task.json` containing:
+1. **Marrow writes a task file** to `runs/<slug>/host_tasks/<task_id>.json` containing:
    - Task type (e.g., `extract_claims`, `synthesize_chapter`, `quiz_generate`)
    - Input artifacts (chunk text, claims, etc.)
    - Required output schema (a Pydantic JSON schema)
    - Source UUIDs for cost attribution and citation tracking
    - A natural-language instruction block for the host agent
 
-2. **The host agent reads the task file**, performs the reasoning in its own context window, and writes a result file to `runs/<slug>/<stage>/results/<task_id>.result.json`.
+2. **The host agent reads or claims the task file**, performs the reasoning in its own context window, and writes a `HostResult`.
 
-3. **Marrow validates the result** against the task's declared schema. If validation fails, Marrow writes a follow-up task with explicit corrections and the host agent retries.
+3. **The host agent submits the result** to `runs/<slug>/host_results/<task_id>.json` directly or via `marrow submit <slug> <task_id> <result_path>`.
 
-4. **Marrow advances** when all tasks for the stage are completed and validated.
+4. **Marrow validates the result** against the task's declared schema. If validation fails, the same task reappears and the host agent retries.
+
+5. **Marrow advances** when all tasks for the stage are completed and validated.
 
 The protocol is fully file-based. No sockets, no IPC, no hidden state. A user can open the task file in a text editor mid-run and see exactly what the host agent is being asked to do.
 
-### FR-H04 — `marrow next` Subcommand
+### FR-H04 — `marrow next` / `marrow submit` / `marrow tasks`
 
 Host Mode introduces a single new top-level command:
 
@@ -138,21 +145,26 @@ Host Mode introduces a single new top-level command:
 marrow next <book-slug>
 ```
 
-The host agent calls this whenever it needs to know what to do next. Marrow returns a JSON object describing the current state:
+The host agent calls this whenever it needs to know what to do next. Marrow returns a JSON object describing the current state and a claimable batch for the active stage:
 
 ```json
 {
   "stage": "04_claims",
   "status": "awaiting_host",
-  "pending_tasks": ["claim_001.task.json", "claim_002.task.json"],
-  "completed_tasks": 47,
-  "total_tasks": 50,
-  "next_action": "Read the pending task files, perform claim extraction, write results to runs/the-book/04_claims/results/",
-  "skill_section": "§4.2 — Claim Extraction"
+  "recommended_parallelism": 4,
+  "counts": {"pending": 12, "claimed": 4, "completed": 47, "total": 63},
+  "tasks": [
+    {
+      "task_id": "<uuid>",
+      "task_path": "runs/the-book/host_tasks/<uuid>.json",
+      "result_path": "runs/the-book/host_results/<uuid>.json",
+      "response_schema_name": "ExtractedClaimsResponse"
+    }
+  ]
 }
 ```
 
-This command is the *only* coupling between the host agent and Marrow's internal state. Everything else flows through files.
+`marrow submit` persists a validated `HostResult` JSON for one task. `marrow tasks` exposes queue state for debugging and inspection. These commands are the coupling between the host agent and Marrow's task queue.
 
 ### FR-H05 — Streaming-Friendly Task Granularity
 
@@ -186,7 +198,7 @@ Marrow MUST detect which host environment it's running inside, when possible:
 | Aider | `AIDER_*` env vars |
 | Unknown agent | None — assume generic |
 
-Detection results are recorded in the run manifest. They influence the skill file's "host-specific tips" section but never gate functionality.
+Detection results are recorded in the run manifest. They influence the playbook's host-specific tips section but never gate functionality.
 
 ### FR-H10 — Graceful Degradation to API Mode
 
@@ -270,7 +282,7 @@ The remaining stages decompose as follows:
 
 ## 7. The Skill File
 
-The skill ships at [`skills/claude-code/marrow/SKILL.md`](skills/claude-code/marrow/SKILL.md) and is the shortest path between a Claude Code session and a running pipeline. It covers task discovery, schema matching, error isolation, and stop conditions.
+The Claude Code skill ships at [`skills/claude-code/marrow/SKILL.md`](skills/claude-code/marrow/SKILL.md) and the Codex playbook ships at [`skills/codex/marrow/SKILL.md`](skills/codex/marrow/SKILL.md). They cover task discovery, schema matching, delegation, error isolation, and stop conditions.
 
 ### Install
 
@@ -288,6 +300,14 @@ cp -r skills/claude-code/marrow ~/.claude/skills/marrow
 ```
 
 After restart, `/marrow` is available in any Claude Code session.
+
+### Codex setup
+
+Open the Codex playbook and follow it in the session:
+
+```bash
+cat skills/codex/marrow/SKILL.md
+```
 
 ### Invoke
 
@@ -329,11 +349,10 @@ Host Mode adds the following commands to the CLI specified in `API.md`:
 | Command | Purpose |
 |---|---|
 | `marrow run <book> --mode host` | Start a Host Mode run. Default behavior from v1.0. |
-| `marrow next <slug>` | Return the next pending task batch as JSON. The host agent's loop pivot point. |
-| `marrow submit <slug> <task_id> <result_path>` | Submit a result for a specific task. (Optional convenience — host agent can also write the result file directly and call `next` again.) |
-| `marrow cost <slug>` | Print the estimated host-token usage for the run. |
-| `marrow tasks <slug>` | List all task files (pending + complete) for inspection. |
-| `marrow validate-result <slug> <result_path>` | Manually validate a result file against its task schema (debug helper). |
+| `marrow next <slug>` | Return the next claimable task batch as JSON. The host agent's loop pivot point. |
+| `marrow submit <slug> <task_id> <result_path>` | Submit a result for a specific task and release its claim. |
+| `marrow tasks <slug>` | Inspect pending / claimed / completed counts and a sample of queued tasks. |
+| `marrow tasks <slug>` | Inspect pending / claimed / completed counts and a sample of queued tasks. |
 
 The original `marrow run`, `marrow batch`, `marrow status`, `marrow clean`, and `marrow ask` commands all continue to work in both modes.
 
@@ -346,7 +365,7 @@ The original `marrow run`, `marrow batch`, `marrow status`, `marrow clean`, and 
 | NFR-H01 | A Host Mode run on a 300-page book MUST complete in ≤ 4 hours of wall-clock time when the host agent is actively processing tasks. |
 | NFR-H02 | A Host Mode run MUST be resumable across host sessions, machines, and operating-system reboots, given the same `runs/` directory. |
 | NFR-H03 | A Host Mode run MUST NOT require any network access beyond what the host agent itself uses. Marrow's own subprocess MUST NOT make outbound HTTP calls. |
-| NFR-H04 | The skill file MUST be ≤ 30k tokens so it loads efficiently into Claude Code's skill system. |
+| NFR-H04 | The host playbook MUST be ≤ 30k tokens so it loads efficiently into the host agent's skill or prompt-loading system. |
 | NFR-H05 | Task files MUST be valid JSON, validated against the published task schema, and human-readable when opened in a text editor. |
 | NFR-H06 | The host agent MUST be able to operate on tasks one at a time without ever needing the entire book in its context window. |
 | NFR-H07 | A Host Mode run MUST produce byte-identical Obsidian output to an API Mode run *given identical reasoning*. (Stochasticity from the LLM is allowed; deterministic post-processing is not.) |
@@ -361,7 +380,7 @@ The original `marrow run`, `marrow batch`, `marrow status`, `marrow clean`, and 
 | Host agent context window fills up before a stage completes | Medium | Tasks are small (≤8k input tokens); the host agent never needs cross-task memory because all state is on disk |
 | User accidentally runs API Mode and Host Mode on the same book | Low | Mode lock (FR-H08) prevents resume across modes |
 | Host agents produce invalid JSON for results | High — pipeline blocks | Strict Pydantic validation + corrective task loop with up to 3 retries; failure to validate after retries marks the chunk as failed and continues |
-| Estimated cost in `marrow cost` diverges wildly from real Claude Code billing | Low | Label as estimate, link to Claude Code billing in the CLI output |
+| Estimated host-token usage diverges wildly from real host-agent billing | Low | Label all telemetry as estimated and keep Marrow's ledger separate from host billing actuals |
 | Skill file too large to fit in some host agents' skill loaders | Medium | Hard cap at 30k tokens; modularize into sub-files loaded on demand |
 | Host agent refuses a task on safety grounds (e.g., misreads a chapter as harmful) | Low | Marrow logs the refusal as a `failed_task`, continues, and reports it in the final summary |
 
@@ -372,11 +391,10 @@ The original `marrow run`, `marrow batch`, `marrow status`, `marrow clean`, and 
 Host Mode is considered **shipped** when all of the following are true:
 
 - [ ] `marrow run book.pdf --mode host` produces a complete brief on the 5-book reference corpus without any API key being set in the environment.
-- [ ] The skill file at `marrow-skill/SKILL.md` is loadable into Claude Code and into Codex CLI without modification.
+- [ ] The Claude Code skill and Codex playbook are both usable without code changes to the pipeline.
 - [ ] A Host Mode run can be killed mid-stage and resumed in a fresh Claude Code session with `marrow next <slug>`.
 - [ ] All 9 P0 user stories from `PRD.md` pass in Host Mode (US-001 through US-009).
 - [ ] HAMLET leaf-recall ≥ 92% on at least 4 of 5 reference books, achieved through the host agent's reasoning alone.
-- [ ] `marrow cost` reports a non-trivial estimate after a successful run.
 - [ ] The mode lock prevents mixing API and Host runs on the same book slug.
 - [ ] The README documents Host Mode as the default and explains how a Claude Code Max user gets started in three commands.
 - [ ] At least one full end-to-end run is recorded as a screencast / asciinema and embedded in the README.
@@ -391,7 +409,7 @@ These need answers before implementation begins. Each is a `[DECISION NEEDED]` f
 2. **Task batching.** Should `marrow next` return one task at a time or a batch of N tasks? Batching reduces host turns but risks context window overflow. Default: batch of 5, configurable.
 3. **Per-task vs. per-stage validation.** Should Marrow validate each result the moment it's written, or only at stage end? Per-task validation gives faster feedback loops but more I/O.
 4. **MCP server alternative.** Should Host Mode also expose an MCP server interface for clients that prefer that pattern over the file-based protocol? Defer to v1.1.
-5. **Codex compatibility.** Codex CLI's session model differs from Claude Code's. The skill file may need a Codex-specific section. Empirically test on both before v1.0.
+5. **Codex compatibility.** Codex CLI's session model differs from Claude Code's. The host playbook may need Codex-specific guidance. Empirically test on both before v1.0.
 6. **Subscription enforcement.** Does Marrow check whether the host agent is actually a paid Claude Code Max session vs. a free-tier session that will rate-limit? No — out of scope; user's responsibility.
 
 ---
