@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from time import perf_counter
 from typing import Any
+from zipfile import ZipFile
 
 from marrow.config import MarrowConfig
 from marrow.errors import StageError
@@ -409,13 +410,15 @@ def _docling_version() -> str:
 def _ingest_fallback(book_path: Path, slug: str) -> tuple[CanonicalDocument, ChapterCoverageAudit]:
     text = _extract_plain_text(book_path)
     sections = _heuristic_split_sections(text, slug)
+    title, author = _extract_fallback_metadata(book_path)
 
     paragraph_count = sum(len(s.paragraphs) for s in sections)
     word_count = sum(len(p.text.split()) for s in sections for p in s.paragraphs)
 
     doc = CanonicalDocument(
         book_slug=slug,
-        book_title=book_path.stem.replace("-", " ").title(),
+        book_title=title or book_path.stem.replace("-", " ").title(),
+        book_author=author,
         source_format="pdf" if book_path.suffix.lower() == ".pdf" else "epub",
         source_path=str(book_path.resolve()),
         page_count=max(1, _estimate_pages(text)),
@@ -438,6 +441,9 @@ def _ingest_fallback(book_path: Path, slug: str) -> tuple[CanonicalDocument, Cha
 
 
 def _extract_plain_text(book_path: Path) -> str:
+    if book_path.suffix.lower() == ".epub":
+        return _extract_epub_plain_text(book_path)
+
     try:
         from pypdf import PdfReader
 
@@ -448,6 +454,121 @@ def _extract_plain_text(book_path: Path) -> str:
             return book_path.read_text(encoding="utf-8", errors="ignore")
         except Exception:
             return ""
+
+
+def _extract_fallback_metadata(book_path: Path) -> tuple[str | None, str | None]:
+    if book_path.suffix.lower() != ".epub":
+        return None, None
+
+    try:
+        with ZipFile(book_path) as zf:
+            opf_path = _epub_package_path(zf)
+            if not opf_path:
+                return None, None
+
+            from bs4 import BeautifulSoup
+
+            soup = BeautifulSoup(zf.read(opf_path), "xml")
+            title_tag = soup.find(["dc:title", "title"])
+            author_tag = soup.find(["dc:creator", "creator"])
+            title = (
+                _normalize_inline_whitespace(title_tag.get_text(" ", strip=True))
+                if title_tag is not None
+                else None
+            )
+            author = (
+                _normalize_inline_whitespace(author_tag.get_text(" ", strip=True))
+                if author_tag is not None
+                else None
+            )
+            return title or None, author or None
+    except Exception:
+        return None, None
+
+
+def _extract_epub_plain_text(book_path: Path) -> str:
+    try:
+        with ZipFile(book_path) as zf:
+            parts = [_extract_epub_html_text(zf, path) for path in _epub_spine_paths(zf)]
+            non_empty = [part for part in parts if part.strip()]
+            if non_empty:
+                return "\n\n".join(non_empty)
+    except Exception:
+        pass
+
+    try:
+        return book_path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return ""
+
+
+def _epub_spine_paths(zf: ZipFile) -> list[str]:
+    opf_path = _epub_package_path(zf)
+    if not opf_path:
+        return _fallback_epub_html_paths(zf)
+
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(zf.read(opf_path), "xml")
+    manifest: dict[str, str] = {}
+    for item in soup.find_all("item"):
+        item_id = item.get("id")
+        href = item.get("href")
+        media_type = item.get("media-type", "")
+        if item_id and href and "html" in media_type:
+            manifest[item_id] = href
+
+    base = PurePosixPath(opf_path).parent
+    paths: list[str] = []
+    for itemref in soup.find_all("itemref"):
+        idref = itemref.get("idref")
+        href = manifest.get(idref or "")
+        if href:
+            paths.append((base / href).as_posix())
+
+    return paths or _fallback_epub_html_paths(zf)
+
+
+def _epub_package_path(zf: ZipFile) -> str | None:
+    try:
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(zf.read("META-INF/container.xml"), "xml")
+        rootfile = soup.find("rootfile")
+        full_path = rootfile.get("full-path") if rootfile is not None else None
+        return full_path or None
+    except Exception:
+        return None
+
+
+def _fallback_epub_html_paths(zf: ZipFile) -> list[str]:
+    html_suffixes = (".xhtml", ".html", ".htm")
+    return sorted(
+        name
+        for name in zf.namelist()
+        if name.lower().endswith(html_suffixes) and not name.startswith("META-INF/")
+    )
+
+
+def _extract_epub_html_text(zf: ZipFile, path: str) -> str:
+    from bs4 import BeautifulSoup
+
+    try:
+        raw = zf.read(path)
+    except KeyError:
+        return ""
+
+    soup = BeautifulSoup(raw, "xml")
+    for tag in soup(["script", "style", "svg"]):
+        tag.decompose()
+
+    lines = [_normalize_inline_whitespace(line) for line in soup.get_text("\n", strip=True).splitlines()]
+    cleaned = [line for line in lines if line]
+    return "\n".join(cleaned)
+
+
+def _normalize_inline_whitespace(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _heuristic_split_sections(text: str, slug: str) -> list[SectionNode]:

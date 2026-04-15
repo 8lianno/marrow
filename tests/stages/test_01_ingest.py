@@ -61,11 +61,99 @@ def test_fallback_returns_audit_with_one_body_section_when_no_headings() -> None
     assert audit.headings_detected == 1
 
 
+def test_fallback_extracts_ordered_text_and_metadata_from_epub() -> None:
+    book_path = _make_temp_epub_file(
+        title="Sample EPUB",
+        author="Jane Doe",
+        chapters=[
+            (
+                "chapter1.xhtml",
+                "<h1>Chapter 1: Foundations</h1><p>All warfare is based on deception.</p>",
+            ),
+            (
+                "chapter2.xhtml",
+                "<h1>Chapter 2: Strategy</h1><p>Supreme excellence consists in breaking resistance.</p>",
+            ),
+        ],
+    )
+
+    doc, audit = _ingest_fallback(book_path, "sample-epub")
+
+    assert doc.book_title == "Sample EPUB"
+    assert doc.book_author == "Jane Doe"
+    assert audit.audit_passed
+    assert [section.title for section in doc.toc] == [
+        "Chapter 1: Foundations",
+        "Chapter 2: Strategy",
+    ]
+    assert "All warfare is based on deception." in doc.toc[0].paragraphs[0].text
+
+
 def _make_temp_text_file(text: str) -> Path:
     import tempfile
 
     path = Path(tempfile.mkstemp(suffix=".txt")[1])
     path.write_text(text)
+    return path
+
+
+def _make_temp_epub_file(
+    *,
+    title: str,
+    author: str,
+    chapters: list[tuple[str, str]],
+) -> Path:
+    import tempfile
+    from zipfile import ZIP_DEFLATED, ZipFile
+
+    path = Path(tempfile.mkstemp(suffix=".epub")[1])
+    with ZipFile(path, "w", compression=ZIP_DEFLATED) as zf:
+        zf.writestr("mimetype", "application/epub+zip")
+        zf.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+""",
+        )
+
+        manifest_items = "\n".join(
+            f'<item id="item{i}" href="{name}" media-type="application/xhtml+xml"/>'
+            for i, (name, _html) in enumerate(chapters, start=1)
+        )
+        spine_items = "\n".join(
+            f'<itemref idref="item{i}"/>' for i, _chapter in enumerate(chapters, start=1)
+        )
+        zf.writestr(
+            "OEBPS/content.opf",
+            f"""<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="bookid" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>{title}</dc:title>
+    <dc:creator>{author}</dc:creator>
+  </metadata>
+  <manifest>
+    {manifest_items}
+  </manifest>
+  <spine>
+    {spine_items}
+  </spine>
+</package>
+""",
+        )
+
+        for name, html in chapters:
+            zf.writestr(
+                f"OEBPS/{name}",
+                f"""<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <body>{html}</body>
+</html>
+""",
+            )
     return path
 
 
