@@ -1,0 +1,4 @@
+extends: express.yaml
+
+chunk:
+  embedding_model: stub
