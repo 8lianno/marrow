@@ -72,6 +72,39 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
     claims = [c for c in all_claims if c.is_duplicate_of is None]
     final_brief = read_json(working_dir / "05b_validate" / "final_brief.json", BriefDraft)
 
+    # Express Mode: evaluate.skip writes a default scorecard and returns without
+    # any LLM calls. HAMLET is deterministic but skipped too so the scorecard is
+    # uniformly empty — express runs are opt-in trust mode, not partial eval.
+    if config.evaluate.skip:
+        out_dir = working_dir / STAGE_NAME
+        out_dir.mkdir(parents=True, exist_ok=True)
+        report = EvaluationReport(
+            book_slug=final_brief.book_slug,
+            brief_version=final_brief.draft_version,
+            booookscore=0.0,
+            factscore=0.0,
+            factscore_length_penalty_applied=False,
+            hamlet_root_recall=0.0,
+            hamlet_branch_recall=0.0,
+            hamlet_leaf_recall=0.0,
+            composite_score=0.0,
+            verdict="PASS",
+            failure_reasons=[],
+            evaluated_at=datetime.now(UTC),
+        )
+        write_json(out_dir / "composite.json", report)
+        log.info("evaluate_skipped_express_mode")
+        return StageResult(
+            stage_name=STAGE_NAME,
+            started_at=started,
+            completed_at=datetime.now(UTC),
+            duration_seconds=perf_counter() - t0,
+            status="warning",
+            counts={},
+            warnings=["evaluate_skipped: express mode"],
+            output_paths=[str(out_dir / "composite.json")],
+        )
+
     caller = LLMCaller(working_dir, config)
 
     # Progress: one tick per section (coherence), then per sampled fact. HAMLET is

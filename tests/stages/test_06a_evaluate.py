@@ -407,6 +407,42 @@ def test_stage_06a_marks_fail_when_thresholds_missed(tmp_path: Path) -> None:
     assert any("FActScore" in r for r in report.failure_reasons)
 
 
+# ---- Express Mode bypass ----
+
+
+def test_stage_06a_express_bypass_writes_default_scorecard(tmp_path: Path) -> None:
+    """US-011 FR-E05: evaluate.skip writes an empty PASS scorecard with zero LLM calls."""
+    wd = _seed_eval_dir(tmp_path)
+
+    cfg = load_config(
+        overrides={
+            "mode": "api",
+            "runs_dir": str(tmp_path / "runs"),
+            "evaluate": {"skip": True},
+        }
+    )
+
+    # No fake server — any LLM call would fail.
+    result = stage_06a_evaluate.run(wd, cfg)
+
+    assert any("express" in w for w in result.warnings)
+
+    report = read_json(wd / "06a_evaluate" / "composite.json", EvaluationReport)
+    assert report.verdict == "PASS"
+    assert report.booookscore == 0.0
+    assert report.factscore == 0.0
+    assert report.composite_score == 0.0
+    assert report.hamlet_root_recall == 0.0
+    assert report.hamlet_branch_recall == 0.0
+    assert report.hamlet_leaf_recall == 0.0
+    assert report.failure_reasons == []
+
+    # Per-metric sidecar files are not written in skip mode.
+    assert not (wd / "06a_evaluate" / "booookscore.json").exists()
+    assert not (wd / "06a_evaluate" / "factscore.json").exists()
+    assert not (wd / "06a_evaluate" / "hamlet.json").exists()
+
+
 @pytest.mark.slow
 @pytest.mark.network
 def test_real_ollama_full_evaluation(tmp_path: Path) -> None:

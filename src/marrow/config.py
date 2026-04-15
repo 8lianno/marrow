@@ -55,6 +55,7 @@ class EvaluateConfig(BaseModel):
     hamlet_leaf_threshold: float = 0.92
     booookscore_threshold: float = 0.70
     factscore_threshold: float = 0.80
+    skip: bool = False
 
 
 class ExportConfig(BaseModel):

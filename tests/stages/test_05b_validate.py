@@ -386,6 +386,39 @@ def test_stage_05b_writes_per_iteration_artifacts(tmp_path: Path) -> None:
     assert res.iteration == 1
 
 
+# ---- Express Mode bypass ----
+
+
+def test_stage_05b_express_bypass_skips_quiz_and_loop(tmp_path: Path) -> None:
+    """US-011 FR-E04: max_iterations=0 must pass Stage 05 draft through unchanged."""
+    wd, _ = _seed_validate_dir(tmp_path)
+    initial = read_json(wd / "05_synthesize" / "draft_brief.json", BriefDraft)
+
+    cfg = load_config(
+        overrides={
+            "mode": "api",
+            "runs_dir": str(tmp_path / "runs"),
+            "validate": {"max_iterations": 0, "pass_rate_threshold": 0.9},
+        }
+    )
+
+    # No fake server — if the stage tries an LLM call it will fail, proving
+    # the bypass skipped quiz generation and the iteration loop.
+    result = stage_05b_validate.run(wd, cfg)
+
+    assert result.counts["iterations"] == 0
+    assert result.counts["questions_generated"] == 0
+    assert any("express" in w for w in result.warnings)
+
+    final = read_json(wd / "05b_validate" / "final_brief.json", BriefDraft)
+    assert final.book_slug == initial.book_slug
+    assert final.draft_version == initial.draft_version
+    assert [s.title for s in final.sections] == [s.title for s in initial.sections]
+
+    # No iter_NN/ directories should exist.
+    assert not (wd / "05b_validate" / "iter_01").exists()
+
+
 @pytest.mark.slow
 @pytest.mark.network
 def test_real_ollama_validate_loop(tmp_path: Path) -> None:

@@ -82,6 +82,28 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
     threshold = config.validate_.pass_rate_threshold
     max_iters = config.validate_.max_iterations
 
+    # Express Mode: max_iterations == 0 skips quiz/examine/regen entirely and
+    # passes the Stage 05 draft through unchanged.
+    if max_iters == 0:
+        write_json(out_dir / "final_brief.json", initial_draft)
+        log.info("validate_skipped_express_mode", reason="max_iterations=0")
+        return StageResult(
+            stage_name=STAGE_NAME,
+            started_at=started,
+            completed_at=datetime.now(UTC),
+            duration_seconds=perf_counter() - t0,
+            status="warning",
+            counts={
+                "iterations": 0,
+                "chunks_sampled": 0,
+                "questions_generated": 0,
+                "best_pass_rate_pct": 0,
+                "threshold_pct": int(threshold * 100),
+            },
+            warnings=["validate_skipped: max_iterations=0 (express mode)"],
+            output_paths=[str(out_dir / "final_brief.json")],
+        )
+
     # Progress: quiz generation + (per-iter answer+grade, up to max_iters rounds).
     # Exact question count is known only after generation; start with the
     # quiz-generation portion and extend once the quiz is in hand.

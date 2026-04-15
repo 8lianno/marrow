@@ -48,3 +48,18 @@ def test_ollama_preset_is_explicit_api_mode() -> None:
     assert cfg.mode == "api"
     assert cfg.models.synthesis.provider == "ollama"
     assert cfg.models.synthesis.model_id == "qwen3:14b"
+
+
+def test_express_preset_disables_validate_and_evaluate() -> None:
+    """US-011: express.yaml sets max_iterations=0 and evaluate.skip=True."""
+    cfg = load_config(config_path=Path("configs/express.yaml"))
+    assert cfg.validate_.max_iterations == 0
+    assert cfg.evaluate.skip is True
+    # Everything else inherits from default.
+    assert cfg.mode == "host"
+    assert cfg.chunk.window_tokens == 512
+
+
+def test_evaluate_skip_defaults_false() -> None:
+    cfg = load_config()
+    assert cfg.evaluate.skip is False
