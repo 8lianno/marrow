@@ -1,4 +1,4 @@
-"""Stage discovery, checkpointing, resume, and mode-lock enforcement."""
+"""Stage discovery, checkpointing, and pipeline execution."""
 
 from __future__ import annotations
 
@@ -12,11 +12,9 @@ from pathlib import Path
 from typing import Protocol
 
 from marrow.config import MarrowConfig
-from marrow.errors import InputNotFound, ModeLockViolation, StageError
-from marrow.host import detect_host_info
+from marrow.errors import InputNotFound, StageError
 from marrow.io import read_json, write_json
 from marrow.logging import get_logger
-from marrow.progress import current as current_progress
 from marrow.schemas.run import RunManifest, StageResult
 from marrow.slug import book_slug
 
@@ -31,9 +29,9 @@ class StageRunner(Protocol):
 
 class Stage:
     def __init__(self, key: str, name: str, dirname: str, run: StageRunner) -> None:
-        self.key = key  # e.g. "01", "05b"
-        self.name = name  # e.g. "ingest", "validate"
-        self.dirname = dirname  # e.g. "01_ingest"
+        self.key = key
+        self.name = name
+        self.dirname = dirname
         self.run = run
 
     def __repr__(self) -> str:
@@ -75,33 +73,17 @@ def mark_complete(working_dir: Path, stage: Stage) -> None:
     marker.write_text(datetime.now(UTC).isoformat() + "\n", encoding="utf-8")
 
 
-def _enforce_mode_lock(working_dir: Path, config: MarrowConfig, force: bool) -> None:
-    manifest_path = working_dir / "manifest.json"
-    if not manifest_path.exists():
-        return
-    prior = read_json(manifest_path)
-    prior_mode = prior.get("mode")
-    if prior_mode and prior_mode != config.mode and not force:
-        raise ModeLockViolation(
-            f"Run was started in mode={prior_mode!r}; cannot resume in mode={config.mode!r}. "
-            "Use --force to wipe the working directory and restart."
-        )
-
-
 def _write_initial_manifest(
     working_dir: Path, config: MarrowConfig, book_path: Path
 ) -> RunManifest:
     from marrow import __version__
 
-    host_info = detect_host_info() if config.mode == "host" else None
     manifest = RunManifest(
         book_slug=book_slug(book_path),
         book_path=str(book_path.resolve()),
-        mode=config.mode,
         started_at=datetime.now(UTC),
         status="in_progress",
         config=config.model_dump(by_alias=True),
-        host_info=host_info,
         marrow_version=__version__,
     )
     write_json(working_dir / "manifest.json", manifest)
@@ -129,14 +111,13 @@ def _finalize_manifest(
     manifest.duration_seconds = (manifest.completed_at - manifest.started_at).total_seconds()
     manifest.status = status  # type: ignore[assignment]
 
-    final_brief = working_dir / "06b_export"
-    if final_brief.exists():
-        for p in final_brief.glob("*_Brief.md"):
-            manifest.final_brief_path = str(p)
-            break
-        for p in final_brief.glob("*_Evaluation.md"):
-            manifest.final_evaluation_path = str(p)
-            break
+    # Link to final output
+    final_dir = working_dir / "05_coherence"
+    if final_dir.exists():
+        for p in final_dir.glob("*.md"):
+            if not p.name.endswith((".spine.md", ".source.md")):
+                manifest.final_output_path = str(p)
+                break
 
     write_json(working_dir / "manifest.json", manifest)
     return manifest
@@ -146,10 +127,8 @@ def run_pipeline(
     book_path: Path,
     config: MarrowConfig,
     *,
-    resume: bool = False,
     force: bool = False,
     only_stage: str | None = None,
-    dry_run: bool = False,
 ) -> RunManifest:
     if not book_path.exists():
         raise InputNotFound(f"Book not found: {book_path}")
@@ -161,81 +140,44 @@ def run_pipeline(
         shutil.rmtree(working_dir)
 
     working_dir.mkdir(parents=True, exist_ok=True)
-    _enforce_mode_lock(working_dir, config, force=force)
-
-    if config.mode == "host":
-        host_info = detect_host_info()
-        log.info(
-            "host_mode_active",
-            message="Host Mode active — API keys ignored. Reasoning will run inside the host agent.",
-            host_environment=host_info.environment,
-            session_id=host_info.session_id,
-        )
 
     stages = discover_stages()
     if not stages:
         raise StageError("orchestrator", "No stages discovered under marrow.stages")
 
-    if dry_run:
-        for s in stages:
-            print(f"  {s.dirname}  ({'SKIP' if is_complete(working_dir, s) else 'RUN'})")
-        return _write_initial_manifest(working_dir, config, book_path)
-
     manifest = _write_initial_manifest(working_dir, config, book_path)
     stage_results: list[StageResult] = []
     overall_status = "success"
 
-    progress = current_progress()
-    # Count the stages we will actually execute (honoring --stage filter and resume).
-    stages_to_run = [
-        s
-        for s in stages
-        if (not only_stage or only_stage in (s.name, s.key, s.dirname))
-        and not (resume and is_complete(working_dir, s))
-    ]
-    progress.pipeline_start(len(stages_to_run))
+    for stage in stages:
+        if only_stage and only_stage not in (stage.name, stage.key, stage.dirname):
+            continue
 
-    try:
-        for stage in stages:
-            if only_stage and only_stage not in (stage.name, stage.key, stage.dirname):
-                continue
-            if resume and is_complete(working_dir, stage):
-                log.info("stage_skipped_already_complete", stage=stage.dirname)
-                existing = working_dir / stage.dirname / "result.json"
-                if existing.exists():
-                    stage_results.append(read_json(existing, StageResult))
-                continue
+        log.info("stage_starting", stage=stage.dirname)
+        try:
+            result = stage.run(working_dir, config)
+        except Exception as e:
+            log.error("stage_crashed", stage=stage.dirname, error=str(e))
+            overall_status = "failed"
+            _finalize_manifest(working_dir, manifest, stage_results, overall_status)
+            raise StageError(stage.dirname, str(e)) from e
 
-            log.info("stage_starting", stage=stage.dirname)
-            # Stages own the call to progress.stage_start — they know their total.
-            try:
-                result = stage.run(working_dir, config)
-            except Exception as e:
-                log.error("stage_crashed", stage=stage.dirname, error=str(e))
-                progress.stage_end(stage.dirname, "failed", 0.0)
-                overall_status = "failed"
-                _finalize_manifest(working_dir, manifest, stage_results, overall_status)
-                raise StageError(stage.dirname, str(e)) from e
+        write_json(working_dir / stage.dirname / "result.json", result)
+        stage_results.append(result)
 
-            write_json(working_dir / stage.dirname / "result.json", result)
-            stage_results.append(result)
-            progress.stage_end(stage.dirname, result.status, result.duration_seconds)
+        if result.status == "failed":
+            overall_status = "failed"
+            log.error("stage_reported_failure", stage=stage.dirname, errors=result.errors)
+            break
+        if result.status == "warning":
+            overall_status = "partial" if overall_status == "success" else overall_status
 
-            if result.status == "failed":
-                overall_status = "failed"
-                log.error("stage_reported_failure", stage=stage.dirname, errors=result.errors)
-                break
-            if result.status == "warning":
-                overall_status = "partial" if overall_status == "success" else overall_status
-
-            mark_complete(working_dir, stage)
-            log.info(
-                "stage_complete",
-                stage=stage.dirname,
-                duration_s=result.duration_seconds,
-                cost_usd=result.cost_usd,
-            )
-    finally:
-        progress.pipeline_end()
+        mark_complete(working_dir, stage)
+        log.info(
+            "stage_complete",
+            stage=stage.dirname,
+            duration_s=result.duration_seconds,
+            cost_usd=result.cost_usd,
+        )
 
     return _finalize_manifest(working_dir, manifest, stage_results, overall_status)

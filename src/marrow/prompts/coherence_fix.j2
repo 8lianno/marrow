@@ -1,0 +1,42 @@
+You are re-distilling ONE chapter to fix specific issues identified in a coherence audit. The original distillation had problems; your job is to produce a corrected version.
+
+FIX INSTRUCTIONS:
+{% for fix in fix_instructions %}
+- {{ fix }}
+{% endfor %}
+
+CHAPTER SPINE (what must be preserved):
+  Thesis: {{ spine.thesis }}
+
+  Frameworks:
+  {% for f in spine.frameworks %}
+  - {{ f.name }}: {{ f.description }}
+  {% endfor %}
+
+  Key examples:
+  {% for e in spine.key_examples %}
+  - {{ e.label }}: {{ e.gist }}
+  {% endfor %}
+
+  Argumentative moves:
+  {% for move in spine.argumentative_moves %}
+  {{ loop.index }}. {{ move }}
+  {% endfor %}
+
+  Voice sample:
+  ---
+  {{ spine.voice_sample }}
+  ---
+
+CURRENT (BROKEN) DISTILLATION OF THIS CHAPTER:
+{{ current_distillation }}
+
+TARGET LENGTH: {{ target_words }} words (±15%).
+
+RULES:
+1. Fix ONLY the issues listed above. Do not rewrite sections that were working fine.
+2. Preserve the voice from the voice sample.
+3. Include paragraph citations [p:id1, p:id2] at the end of each paragraph.
+4. Begin with ## {{ chapter_title }}. No preamble.
+
+Write the corrected chapter now.

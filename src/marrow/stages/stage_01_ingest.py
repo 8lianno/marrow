@@ -20,7 +20,6 @@ from marrow.errors import StageError
 from marrow.ids import paragraph_id, section_id
 from marrow.io import write_json, write_text
 from marrow.logging import get_logger
-from marrow.progress import current as progress_current
 from marrow.schemas.document import (
     CanonicalDocument,
     ChapterCoverageAudit,
@@ -47,20 +46,12 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
         raise StageError(STAGE_NAME, f"Book file disappeared: {book_path}")
     slug = book_slug(book_path)
 
-    progress = progress_current()
-    # Page count is unknown until Docling returns; use indeterminate spinner.
-    progress.stage_start(STAGE_NAME, total=None, unit="page")
-
     try:
         doc, audit = _ingest_with_docling(book_path, slug, config)
     except Exception as e:
         warnings.append(f"docling_failed ({type(e).__name__}): {e}; using fallback")
         log.warning("docling_failed_using_fallback", error=str(e))
         doc, audit = _ingest_fallback(book_path, slug)
-
-    # Now we know the page count — extend the bar and fill it.
-    progress.stage_extend(doc.page_count)
-    progress.stage_advance(doc.page_count)
 
     if not audit.audit_passed:
         warnings.append(

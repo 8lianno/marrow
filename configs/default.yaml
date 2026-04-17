@@ -1,78 +1,45 @@
-# Marrow default configuration. CLI flags > env vars (MARROW_*) > this file > built-in defaults.
-# Host Mode is the default product path. Marrow will use the host agent for all
-# reasoning unless you explicitly switch to `--mode api`.
-mode: host  # host | api
+# Marrow v2 default configuration.
+# CLI flags > env vars (MARROW_*) > this file > built-in defaults.
 
 ingest:
   parser: docling
   parser_mode: auto
 
-chunk:
-  embedding_model: jinaai/jina-embeddings-v2-base-en
-  window_tokens: 4096
-  overlap_pct: 0.10
+distill:
+  compression_ratio: 0.30
+  max_continuation_rounds: 5
 
-graph:
-  community_top_k: 512
-
-claims:
-  dedup_threshold: 0.92
-
-synthesize:
-  target_pages: 50
-  page_tolerance: 5
-
-validate:
-  max_iterations: 3
-  pass_rate_threshold: 0.90
-
-evaluate:
-  hamlet_leaf_threshold: 0.92
-  booookscore_threshold: 0.70
-  factscore_threshold: 0.80
+coherence:
+  max_fix_rounds: 2
+  similarity_threshold: 0.75
 
 export:
-  vault: null  # falls back to runs/<slug>/06b_export/
+  vault: null
 
 cost:
-  max_per_book: 4.00
+  max_per_book: 3.00
 
-# API-mode fallback routes. These are ignored in Host Mode.
-# If you want an explicit API preset, prefer configs/ollama.yaml,
-# configs/anthropic.yaml, configs/gemini.yaml, or configs/openrouter.yaml.
 models:
-  claim_extraction:
-    provider: ollama
-    model_id: qwen3:14b
-    api_base: http://localhost:11434
-  graph_extraction:
-    provider: ollama
-    model_id: qwen3:14b
-    api_base: http://localhost:11434
-  synthesis:
-    provider: ollama
-    model_id: qwen3:14b
-    api_base: http://localhost:11434
-  validation:
-    provider: ollama
-    model_id: qwen3:14b
-    api_base: http://localhost:11434
-  quiz_generation:
-    provider: ollama
-    model_id: qwen3:14b
-    api_base: http://localhost:11434
+  # Flash with thinking for spine extraction — needs reasoning to decide
+  # what's load-bearing vs filler.
+  spine:
+    provider: gemini
+    model_id: gemini-2.5-flash
+    api_key_env: GEMINI_API_KEY
+    thinking: true
+    thinking_budget: 8192
 
-host:
-  task_dir: host_tasks
-  result_dir: host_results
-  claim_dir: host_claims
-  poll_interval_seconds: 1.0
-  task_timeout_seconds: 3600.0
-  task_max_input_tokens: 8000
-  task_max_output_tokens: 4000
-  default_batch_size: 4
-  claim_ttl_seconds: 1800
-  allow_stub_fallback: false
+  # Pro for distillation — needs high-quality prose generation.
+  distill:
+    provider: gemini
+    model_id: gemini-2.5-pro
+    api_key_env: GEMINI_API_KEY
+
+  # Sonnet for coherence audit — whole-book reasoning, one call.
+  coherence:
+    provider: anthropic
+    model_id: claude-sonnet-4-6
+    api_key_env: ANTHROPIC_API_KEY
 
 logging:
   level: INFO

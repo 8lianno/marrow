@@ -12,7 +12,6 @@ class MarrowExitCode(IntEnum):
     BUDGET_EXCEEDED = 4
     LLM_ERROR = 5
     INPUT_NOT_FOUND = 6
-    MODE_LOCK_VIOLATION = 7
     INVALID_INPUT = 8
     UNKNOWN = 99
 
@@ -47,13 +46,7 @@ class LLMError(MarrowError):
     exit_code = MarrowExitCode.LLM_ERROR
 
 
-class ChunkExtractionFailed(MarrowError):
-    """Single-chunk failure. Caller MUST catch and continue, never propagate."""
+class CostCeilingHit(MarrowError):
+    """Projected cost exceeds the per-book ceiling."""
 
-    exit_code = MarrowExitCode.STAGE_FAILED
-
-
-class ModeLockViolation(MarrowError):
-    """Attempted to resume in a different mode than the run was started in."""
-
-    exit_code = MarrowExitCode.MODE_LOCK_VIOLATION
+    exit_code = MarrowExitCode.BUDGET_EXCEEDED

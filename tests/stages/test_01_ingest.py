@@ -20,13 +20,12 @@ from marrow.stages import stage_01_ingest
 from marrow.stages.stage_01_ingest import _heuristic_split_sections, _ingest_fallback
 
 
-def _seed_manifest(working_dir: Path, book_path: Path, mode: str = "api") -> None:
+def _seed_manifest(working_dir: Path, book_path: Path) -> None:
     """Write the minimum manifest stage_01_ingest reads to find the book path."""
     working_dir.mkdir(parents=True, exist_ok=True)
     manifest = RunManifest(
         book_slug="test",
         book_path=str(book_path.resolve()),
-        mode=mode,  # type: ignore[arg-type]
         started_at=datetime.now(UTC),
         status="in_progress",
         config={},
@@ -162,7 +161,7 @@ def _make_temp_epub_file(
 
 @pytest.mark.slow
 def test_real_docling_extracts_three_chapters(synthetic_pdf: Path, tmp_path: Path) -> None:
-    cfg = load_config(overrides={"mode": "api", "runs_dir": str(tmp_path)})
+    cfg = load_config(overrides={"runs_dir": str(tmp_path)})
     working_dir = tmp_path / "wd"
     _seed_manifest(working_dir, synthetic_pdf)
 
@@ -180,7 +179,7 @@ def test_real_docling_extracts_three_chapters(synthetic_pdf: Path, tmp_path: Pat
 
 @pytest.mark.slow
 def test_real_docling_recovers_subsections(nested_pdf: Path, tmp_path: Path) -> None:
-    cfg = load_config(overrides={"mode": "api", "runs_dir": str(tmp_path)})
+    cfg = load_config(overrides={"runs_dir": str(tmp_path)})
     working_dir = tmp_path / "wd"
     _seed_manifest(working_dir, nested_pdf)
 
@@ -195,7 +194,7 @@ def test_real_docling_recovers_subsections(nested_pdf: Path, tmp_path: Path) -> 
 
 @pytest.mark.slow
 def test_real_docling_records_per_paragraph_pages(synthetic_pdf: Path, tmp_path: Path) -> None:
-    cfg = load_config(overrides={"mode": "api", "runs_dir": str(tmp_path)})
+    cfg = load_config(overrides={"runs_dir": str(tmp_path)})
     working_dir = tmp_path / "wd"
     _seed_manifest(working_dir, synthetic_pdf)
 
@@ -209,7 +208,7 @@ def test_real_docling_records_per_paragraph_pages(synthetic_pdf: Path, tmp_path:
 
 @pytest.mark.slow
 def test_real_docling_emits_source_md_with_anchors(synthetic_pdf: Path, tmp_path: Path) -> None:
-    cfg = load_config(overrides={"mode": "api", "runs_dir": str(tmp_path)})
+    cfg = load_config(overrides={"runs_dir": str(tmp_path)})
     working_dir = tmp_path / "wd"
     _seed_manifest(working_dir, synthetic_pdf)
 

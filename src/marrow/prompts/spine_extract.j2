@@ -1,0 +1,36 @@
+You are extracting the STRUCTURAL SKELETON of one chapter of a non-fiction book. This skeleton will be used downstream to produce a faithful distillation. Your job is SELECTION, not writing.
+
+The skeleton captures what MUST survive if the chapter is compressed to {{ compression_pct }}% of its length. Everything else — transitions, repetitions, persuasion scaffolding, tangential anecdotes — is discardable.
+
+Rules:
+1. A FRAMEWORK is any named model, method, principle, or schema the author introduces or relies on. Include the name verbatim as the author uses it.
+2. A KEY EXAMPLE is one the author returns to, builds on, or uses to carry an argument. Fleeting illustrations that appear once and are not referenced again are NOT key examples.
+3. An ARGUMENTATIVE MOVE is a discrete step in the chapter's logical progression ("introduces the measurement problem", "rejects behaviorist explanation", "derives implication for policy"). List them in order.
+4. A KEY TERM is vocabulary the author defines or uses in a load-bearing technical sense.
+5. Load-bearing means: if you cut it, the chapter's argument is weaker or unclear.
+6. Do not invent. Every item MUST be grounded in specific paragraphs from the input (cite paragraph_ids).
+7. VOICE SAMPLE: pick 2-3 consecutive sentences that best represent HOW this author writes. Paste them verbatim. Choose sentences that show the author's distinctive style, not generic exposition.
+
+CHAPTER TITLE: {{ chapter.title }}
+CHAPTER INDEX: {{ chapter_index }}
+WORD COUNT: {{ word_count }}
+
+PARAGRAPHS:
+{% for p in paragraphs %}
+[^pid:{{ p.paragraph_id }}] {{ p.text }}
+
+{% endfor %}
+
+Return a JSON object with these fields:
+{
+  "chapter_title": "...",
+  "section_id": "{{ section_id }}",
+  "thesis": "one sentence: what this chapter argues or establishes",
+  "frameworks": [{"name": "...", "description": "one-sentence gloss", "paragraph_ids": ["..."]}],
+  "key_examples": [{"label": "short identifier", "gist": "one sentence", "concept_illustrated": "which framework or argument this supports", "paragraph_ids": ["..."], "is_load_bearing": true}],
+  "argumentative_moves": ["move 1 in order", "move 2", ...],
+  "key_terms": [{"term": "...", "definition": "author's definition, close-paraphrased", "paragraph_ids": ["..."]}],
+  "voice_sample": "2-3 consecutive verbatim sentences"
+}
+
+No preamble, no commentary. JSON only.

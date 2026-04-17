@@ -19,43 +19,28 @@ from pydantic import BaseModel, Field
 
 from marrow.errors import ConfigError
 
-RunMode = Literal["host", "api"]
-
 
 class IngestConfig(BaseModel):
-    parser: Literal["docling", "marker", "mineru"] = "docling"
+    parser: Literal["docling", "pypdf"] = "docling"
     parser_mode: Literal["auto", "force_ocr", "text_only"] = "auto"
 
 
-class ChunkConfig(BaseModel):
-    embedding_model: str = "jinaai/jina-embeddings-v2-base-en"
-    window_tokens: int = 4096
-    overlap_pct: float = 0.10
+class ClassifyConfig(BaseModel):
+    pass
 
 
-class GraphConfig(BaseModel):
-    community_top_k: int = 512
+class SpineConfig(BaseModel):
+    pass
 
 
-class ClaimsConfig(BaseModel):
-    dedup_threshold: float = 0.92
+class DistillConfig(BaseModel):
+    compression_ratio: float = 0.30
+    max_continuation_rounds: int = 5
 
 
-class SynthesizeConfig(BaseModel):
-    target_pages: int = 50
-    page_tolerance: int = 5
-
-
-class ValidateConfig(BaseModel):
-    max_iterations: int = 3
-    pass_rate_threshold: float = 0.90
-
-
-class EvaluateConfig(BaseModel):
-    hamlet_leaf_threshold: float = 0.92
-    booookscore_threshold: float = 0.70
-    factscore_threshold: float = 0.80
-    skip: bool = False
+class CoherenceConfig(BaseModel):
+    max_fix_rounds: int = 2
+    similarity_threshold: float = 0.75
 
 
 class ExportConfig(BaseModel):
@@ -63,65 +48,57 @@ class ExportConfig(BaseModel):
 
 
 class CostConfig(BaseModel):
-    max_per_book: float = 4.00
+    max_per_book: float = 3.00
 
 
 class ModelRoute(BaseModel):
-    provider: Literal["anthropic", "ollama", "gemini", "openrouter", "vllm", "jina", "stub"] = (
-        "stub"
-    )
+    provider: Literal["anthropic", "gemini", "stub"] = "stub"
     model_id: str = "stub"
-    api_base: str | None = None  # e.g. http://localhost:11434 for ollama
-    api_key_env: str | None = None  # name of env var holding the API key
+    api_key_env: str | None = None
+    thinking: bool = False  # enable Gemini thinking mode
+    thinking_budget: int = 8192  # max thinking tokens
 
 
 class ModelsConfig(BaseModel):
-    claim_extraction: ModelRoute = Field(default_factory=ModelRoute)
-    graph_extraction: ModelRoute = Field(default_factory=ModelRoute)
-    synthesis: ModelRoute = Field(default_factory=ModelRoute)
-    validation: ModelRoute = Field(default_factory=ModelRoute)
-    quiz_generation: ModelRoute = Field(default_factory=ModelRoute)
-
-
-class HostConfig(BaseModel):
-    task_dir: str = "host_tasks"
-    result_dir: str = "host_results"
-    claim_dir: str = "host_claims"
-    poll_interval_seconds: float = 1.0
-    task_timeout_seconds: float = 3600.0
-    task_max_input_tokens: int = 8000
-    task_max_output_tokens: int = 4000
-    default_batch_size: int = 4
-    claim_ttl_seconds: int = 1800
-    allow_stub_fallback: bool = False
+    spine: ModelRoute = Field(
+        default_factory=lambda: ModelRoute(
+            provider="gemini",
+            model_id="gemini-2.5-flash",
+            api_key_env="GEMINI_API_KEY",
+            thinking=True,
+            thinking_budget=8192,
+        )
+    )
+    distill: ModelRoute = Field(
+        default_factory=lambda: ModelRoute(
+            provider="gemini",
+            model_id="gemini-2.5-pro",
+            api_key_env="GEMINI_API_KEY",
+        )
+    )
+    coherence: ModelRoute = Field(
+        default_factory=lambda: ModelRoute(
+            provider="anthropic",
+            model_id="claude-sonnet-4-6",
+            api_key_env="ANTHROPIC_API_KEY",
+        )
+    )
 
 
 class LoggingConfig(BaseModel):
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
 
-class MonitorConfig(BaseModel):
-    input_dir: str = "inbox"
-    output_dir: str = "briefs"
-    poll_interval_seconds: float = 5.0
-    supported_extensions: list[str] = Field(default_factory=lambda: [".pdf", ".epub"])
-
-
 class MarrowConfig(BaseModel):
-    mode: RunMode = "host"
     ingest: IngestConfig = Field(default_factory=IngestConfig)
-    chunk: ChunkConfig = Field(default_factory=ChunkConfig)
-    graph: GraphConfig = Field(default_factory=GraphConfig)
-    claims: ClaimsConfig = Field(default_factory=ClaimsConfig)
-    synthesize: SynthesizeConfig = Field(default_factory=SynthesizeConfig)
-    validate_: ValidateConfig = Field(default_factory=ValidateConfig, alias="validate")
-    evaluate: EvaluateConfig = Field(default_factory=EvaluateConfig)
+    classify: ClassifyConfig = Field(default_factory=ClassifyConfig)
+    spine: SpineConfig = Field(default_factory=SpineConfig)
+    distill: DistillConfig = Field(default_factory=DistillConfig)
+    coherence: CoherenceConfig = Field(default_factory=CoherenceConfig)
     export: ExportConfig = Field(default_factory=ExportConfig)
     cost: CostConfig = Field(default_factory=CostConfig)
     models: ModelsConfig = Field(default_factory=ModelsConfig)
-    host: HostConfig = Field(default_factory=HostConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
-    monitor: MonitorConfig = Field(default_factory=MonitorConfig)
     runs_dir: str = "runs"
 
     model_config = {"populate_by_name": True}

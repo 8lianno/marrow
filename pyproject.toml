@@ -1,12 +1,12 @@
 [project]
 name = "marrow"
-version = "0.1.0"
-description = "Lossless book-to-brief: turn a 300-page non-fiction book into a 50-page conceptual brief with citation-traceable, machine-verified completeness."
-readme = "PRD.md"
+version = "2.0.0"
+description = "Distill a 300-page non-fiction book into a faithful ~90-page brief with citation traceability."
+readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Ali Naserifar" }]
-keywords = ["nlp", "summarization", "obsidian", "graphrag", "books"]
+keywords = ["nlp", "distillation", "obsidian", "books", "non-fiction"]
 
 dependencies = [
     "pydantic>=2.5",
@@ -14,18 +14,19 @@ dependencies = [
     "rich>=13.7",
     "structlog>=24.1",
     "pyyaml>=6.0",
+    "jinja2>=3.1",
     "anthropic>=0.40",
+    "google-genai>=1.0",
     "docling>=2.0",
-    "reportlab>=4.0",
+    "pypdf>=4.0",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
 ]
 
 [project.optional-dependencies]
-mineru = ["mineru"]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
-    "pytest-recording>=0.13",
-    "hypothesis>=6.100",
     "ruff>=0.5",
     "mypy>=1.10",
 ]
@@ -59,15 +60,14 @@ files = ["src/marrow"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["docling.*", "reportlab.*", "lancedb.*", "nano_graphrag.*"]
+module = ["docling.*", "google.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
 markers = [
-    "slow: end-to-end tests that hit Docling or write large fixtures",
-    "network: tests that require network (skipped by default)",
+    "slow: end-to-end tests that hit Docling or external APIs",
 ]
 
 [tool.coverage.run]

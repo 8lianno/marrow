@@ -1,16 +1,7 @@
-"""Mandatory LLM call wrapper with two backends (API + Host).
+"""Mandatory LLM call wrapper — Gemini + Anthropic only.
 
-Every model call in Marrow MUST go through `marrow.llm.call()`. Direct
-`anthropic.Client(...)` or HTTP calls bypass cost telemetry, retry, schema
-validation, and budget enforcement and are strictly forbidden.
-
-Backends:
-- `api`: calls Anthropic SDK directly. Cost ledger ticks per call. Requires
-  ANTHROPIC_API_KEY for anthropic-routed model_roles.
-- `host`: writes a HostTask JSON to runs/<slug>/host_tasks/, polls for a
-  matching HostResult JSON, returns the parsed response. The host agent
-  (Claude Code, Codex, Cursor, Aider) supplies the reasoning. No API key
-  read; no outbound network call.
+Every model call in Marrow MUST go through this module. Direct SDK calls
+bypass cost telemetry, retry, schema validation, and budget enforcement.
 """
 
 from __future__ import annotations
@@ -25,21 +16,20 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel
 
 from marrow.config import MarrowConfig
-from marrow.errors import BudgetExceeded, LLMError
-from marrow.host import quality_hints_for
+from marrow.errors import BudgetExceeded, CostCeilingHit, LLMError
 from marrow.io import write_json
 from marrow.logging import get_logger
-from marrow.schemas.run import HostResult, HostTask
 from marrow.store.ledger import CostLedger
 
 T = TypeVar("T", bound=BaseModel)
 log = get_logger(__name__)
 
-# Crude per-1k-token pricing for cost estimates. Values approximate as of 2026-04.
-_PRICING_USD_PER_1K = {
+# Per-1k-token pricing (approximate, 2026-04).
+_PRICING_USD_PER_1K: dict[tuple[str, str], tuple[float, float]] = {
     ("anthropic", "claude-sonnet-4-6"): (0.003, 0.015),
     ("anthropic", "claude-opus-4-6"): (0.015, 0.075),
-    ("vllm", "*"): (0.0, 0.0),
+    ("gemini", "gemini-2.5-flash"): (0.00015, 0.0006),
+    ("gemini", "gemini-2.5-pro"): (0.00125, 0.005),
     ("stub", "*"): (0.0, 0.0),
 }
 
@@ -52,8 +42,17 @@ def _estimate_cost(provider: str, model_id: str, tokens_in: int, tokens_out: int
 
 
 def _approx_tokens(text: str) -> int:
-    # 4 chars/token approximation. Replaced by tokenizer in M3+.
     return max(1, len(text) // 4)
+
+
+class LLMResponse:
+    """Wraps a raw LLM response with metadata."""
+
+    def __init__(self, text: str, tokens_in: int, tokens_out: int, finish_reason: str = "STOP"):
+        self.text = text
+        self.tokens_in = tokens_in
+        self.tokens_out = tokens_out
+        self.finish_reason = finish_reason
 
 
 class LLMCaller:
@@ -73,85 +72,55 @@ class LLMCaller:
         prompt: str,
         model_role: str,
         response_schema: type[T] | None = None,
-        chunk_uuids: list[UUID] | None = None,
+        max_tokens: int = 8192,
     ) -> T | str:
+        """High-level call that returns validated schema or raw text."""
+        raw = self.call_raw(
+            stage=stage,
+            prompt=prompt,
+            model_role=model_role,
+            response_schema=response_schema,
+            max_tokens=max_tokens,
+        )
+        return self._validate(raw.text, response_schema)
+
+    def call_raw(
+        self,
+        *,
+        stage: str,
+        prompt: str,
+        model_role: str,
+        response_schema: type[T] | None = None,
+        max_tokens: int = 8192,
+    ) -> LLMResponse:
+        """Low-level call that returns LLMResponse with finish_reason."""
         route = getattr(self.config.models, model_role, None)
         if route is None:
             raise LLMError(f"Unknown model_role: {model_role}")
 
         self._budget_gate()
 
-        if self.config.mode == "host":
-            return self._host_call(
-                stage=stage,
-                prompt=prompt,
-                model_role=model_role,
-                response_schema=response_schema,
-                chunk_uuids=chunk_uuids or [],
-            )
-        return self._api_call(
-            stage=stage,
-            prompt=prompt,
-            model_role=model_role,
-            provider=route.provider,
-            model_id=route.model_id,
-            response_schema=response_schema,
-            chunk_uuids=chunk_uuids or [],
-        )
-
-    def _budget_gate(self) -> None:
-        spent = self.ledger.total_usd()
-        cap = self.config.cost.max_per_book
-        if spent >= cap:
-            self.ledger.record_budget_event("exceeded", spent, cap)
-            raise BudgetExceeded(
-                f"Spent ${spent:.4f} reached cap ${cap:.2f}. Re-run with a higher --cost-cap."
-            )
-
-    def _api_call(
-        self,
-        *,
-        stage: str,
-        prompt: str,
-        model_role: str,
-        provider: str,
-        model_id: str,
-        response_schema: type[T] | None,
-        chunk_uuids: list[UUID],
-    ) -> T | str:
         call_id = uuid4()
         started = time.perf_counter()
 
-        route = getattr(self.config.models, model_role)
+        provider = route.provider
+        model_id = route.model_id
+
         if provider == "stub":
-            response_text = self._stub_response(prompt, response_schema)
-            tokens_in = _approx_tokens(prompt)
-            tokens_out = _approx_tokens(response_text)
+            text = self._stub_response(prompt, response_schema)
+            raw = LLMResponse(text, _approx_tokens(prompt), _approx_tokens(text), "STOP")
         elif provider == "anthropic":
-            response_text, tokens_in, tokens_out = self._anthropic_call(
-                model_id, prompt, response_schema
-            )
-        elif provider == "ollama":
-            response_text, tokens_in, tokens_out = self._ollama_call(
-                model_id, prompt, response_schema, route.api_base
-            )
+            raw = self._anthropic_call(model_id, prompt, response_schema, max_tokens)
         elif provider == "gemini":
-            response_text, tokens_in, tokens_out = self._gemini_call(
-                model_id, prompt, response_schema, route.api_key_env
-            )
-        elif provider == "openrouter":
-            response_text, tokens_in, tokens_out = self._openrouter_call(
-                model_id, prompt, response_schema, route.api_base, route.api_key_env
-            )
-        elif provider == "vllm":
-            response_text, tokens_in, tokens_out = self._vllm_call(
-                model_id, prompt, response_schema
+            raw = self._gemini_call(
+                model_id, prompt, response_schema, route.api_key_env, max_tokens,
+                thinking=route.thinking, thinking_budget=route.thinking_budget,
             )
         else:
             raise LLMError(f"Unknown provider: {provider}")
 
         latency_ms = int((time.perf_counter() - started) * 1000)
-        usd = _estimate_cost(provider, model_id, tokens_in, tokens_out)
+        usd = _estimate_cost(provider, model_id, raw.tokens_in, raw.tokens_out)
 
         self._archive_call(
             call_id=call_id,
@@ -160,107 +129,37 @@ class LLMCaller:
             provider=provider,
             model_id=model_id,
             prompt=prompt,
-            response=response_text,
-            tokens_in=tokens_in,
-            tokens_out=tokens_out,
+            response=raw.text,
+            tokens_in=raw.tokens_in,
+            tokens_out=raw.tokens_out,
             usd=usd,
             latency_ms=latency_ms,
+            finish_reason=raw.finish_reason,
         )
         self.ledger.record_call(
             stage=stage,
             model_role=model_role,
             model_id=model_id,
             provider=provider,
-            tokens_in=tokens_in,
-            tokens_out=tokens_out,
+            tokens_in=raw.tokens_in,
+            tokens_out=raw.tokens_out,
             usd=usd,
             latency_ms=latency_ms,
-            chunk_uuids=chunk_uuids,
         )
-        return self._validate(response_text, response_schema)
+        return raw
 
-    def _host_call(
-        self,
-        *,
-        stage: str,
-        prompt: str,
-        model_role: str,
-        response_schema: type[T] | None,
-        chunk_uuids: list[UUID],
-    ) -> T | str:
-        task_id = uuid4()
-        task_dir = self.working_dir / self.config.host.task_dir
-        result_dir = self.working_dir / self.config.host.result_dir
-        task_dir.mkdir(parents=True, exist_ok=True)
-        result_dir.mkdir(parents=True, exist_ok=True)
-
-        task = HostTask(
-            task_id=task_id,
-            stage=stage,
-            model_role=model_role,
-            prompt=prompt,
-            response_schema=response_schema.model_json_schema() if response_schema else None,
-            response_schema_name=response_schema.__name__ if response_schema else None,
-            chunk_uuids=chunk_uuids,
-            max_input_tokens=self.config.host.task_max_input_tokens,
-            max_output_tokens=self.config.host.task_max_output_tokens,
-            parallelizable=True,
-            quality_hints=quality_hints_for(stage, model_role),
-            created_at=datetime.now(UTC),
-        )
-        write_json(task_dir / f"{task_id}.json", task)
-        log.info("host_task_written", task_id=str(task_id), stage=stage, model_role=model_role)
-
-        result_path = result_dir / f"{task_id}.json"
-        deadline = time.time() + self.config.host.task_timeout_seconds
-        while time.time() < deadline:
-            if result_path.exists():
-                raw = json.loads(result_path.read_text(encoding="utf-8"))
-                result = HostResult.model_validate(raw)
-                self.ledger.record_call(
-                    stage=stage,
-                    model_role=model_role,
-                    model_id=result.model_id or f"{result.host_environment or 'host'}-agent",
-                    provider="host",
-                    tokens_in=result.estimated_tokens_in,
-                    tokens_out=result.estimated_tokens_out,
-                    usd=0.0,
-                    latency_ms=0,
-                    chunk_uuids=chunk_uuids,
-                )
-                response_text = (
-                    json.dumps(result.response)
-                    if not isinstance(result.response, str)
-                    else result.response
-                )
-                return self._validate(response_text, response_schema)
-            time.sleep(self.config.host.poll_interval_seconds)
-
-        if not self.config.host.allow_stub_fallback:
-            raise LLMError(
-                f"Timed out waiting for host result for task {task_id}. "
-                "Use `marrow next` to claim work and `marrow submit` to submit results."
+    def _budget_gate(self) -> None:
+        spent = self.ledger.total_usd()
+        cap = self.config.cost.max_per_book
+        if spent >= cap:
+            self.ledger.record_budget_event("exceeded", spent, cap)
+            raise BudgetExceeded(
+                f"Spent ${spent:.4f} reached cap ${cap:.2f}. Re-run with a higher cost cap."
             )
 
-        # Stub fallback is test-only. It must be explicitly enabled in config.
-        log.warning("host_task_timeout_falling_back_to_stub", task_id=str(task_id))
-        response_text = self._stub_response(prompt, response_schema)
-        self.ledger.record_call(
-            stage=stage,
-            model_role=model_role,
-            model_id="host-agent-stub",
-            provider="host",
-            tokens_in=_approx_tokens(prompt),
-            tokens_out=_approx_tokens(response_text),
-            usd=0.0,
-            latency_ms=0,
-            chunk_uuids=chunk_uuids,
-        )
-        return self._validate(response_text, response_schema)
-
     def _anthropic_call(
-        self, model_id: str, prompt: str, response_schema: type[T] | None
-    ) -> tuple[str, int, int]:
+        self, model_id: str, prompt: str, response_schema: type[T] | None, max_tokens: int
+    ) -> LLMResponse:
         try:
             from anthropic import Anthropic
         except ImportError as e:
@@ -269,57 +168,15 @@ class LLMCaller:
         client = Anthropic()
         msg = client.messages.create(
             model=model_id,
-            max_tokens=4096,
+            max_tokens=max_tokens,
             temperature=0.0,
             messages=[{"role": "user", "content": prompt}],
         )
         text = "".join(getattr(b, "text", "") for b in msg.content)
-        tokens_in = msg.usage.input_tokens
-        tokens_out = msg.usage.output_tokens
-        return text, tokens_in, tokens_out
-
-    def _ollama_call(
-        self,
-        model_id: str,
-        prompt: str,
-        response_schema: type[T] | None,
-        api_base: str | None,
-    ) -> tuple[str, int, int]:
-        """Call a local Ollama server via /api/chat.
-
-        When `response_schema` is provided, requests JSON-mode output and passes
-        the Pydantic schema to Ollama's `format` field — Ollama constrains
-        sampling to produce valid JSON matching the schema.
-        """
-        import json as _json
-        import urllib.error
-        import urllib.request
-
-        base = (api_base or "http://localhost:11434").rstrip("/")
-        body: dict[str, Any] = {
-            "model": model_id,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
-            "options": {"temperature": 0.0},
-        }
-        if response_schema is not None:
-            body["format"] = response_schema.model_json_schema()
-
-        req = urllib.request.Request(
-            f"{base}/api/chat",
-            data=_json.dumps(body).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=600) as resp:
-                raw = _json.loads(resp.read().decode("utf-8"))
-        except urllib.error.URLError as e:
-            raise LLMError(f"ollama request failed: {e}") from e
-
-        text = raw.get("message", {}).get("content", "")
-        tokens_in = int(raw.get("prompt_eval_count", _approx_tokens(prompt)))
-        tokens_out = int(raw.get("eval_count", _approx_tokens(text)))
-        return text, tokens_in, tokens_out
+        finish = msg.stop_reason or "end_turn"
+        # Map Anthropic stop reasons to a common format
+        finish_reason = "MAX_TOKENS" if finish == "max_tokens" else "STOP"
+        return LLMResponse(text, msg.usage.input_tokens, msg.usage.output_tokens, finish_reason)
 
     def _gemini_call(
         self,
@@ -327,9 +184,13 @@ class LLMCaller:
         prompt: str,
         response_schema: type[T] | None,
         api_key_env: str | None,
-    ) -> tuple[str, int, int]:
+        max_tokens: int,
+        thinking: bool = False,
+        thinking_budget: int = 8192,
+    ) -> LLMResponse:
         try:
             from google import genai
+            from google.genai import types as genai_types
         except ImportError as e:
             raise LLMError(
                 f"google-genai SDK not installed; run `uv pip install google-genai`: {e}"
@@ -342,7 +203,19 @@ class LLMCaller:
             raise LLMError(f"Gemini requires API key in env var {api_key_env or 'GEMINI_API_KEY'}")
 
         client = genai.Client(api_key=key)
-        generation_config: dict[str, Any] = {"temperature": 0.0}
+        generation_config: dict[str, Any] = {
+            "max_output_tokens": max_tokens,
+        }
+
+        # Thinking mode: enable extended reasoning before answering.
+        # When thinking is on, temperature must be unset (Gemini controls it).
+        if thinking:
+            generation_config["thinking_config"] = genai_types.ThinkingConfig(
+                thinking_budget=thinking_budget,
+            )
+        else:
+            generation_config["temperature"] = 0.0
+
         if response_schema is not None:
             generation_config["response_mime_type"] = "application/json"
             generation_config["response_schema"] = response_schema
@@ -352,81 +225,37 @@ class LLMCaller:
             contents=prompt,
             config=generation_config,
         )
-        text = response.text or ""
+
+        # Extract text from response, skipping thinking parts
+        text = ""
+        candidates = getattr(response, "candidates", None)
+        if candidates and candidates[0].content and candidates[0].content.parts:
+            for part in candidates[0].content.parts:
+                # Skip thinking parts — only take the final answer
+                if getattr(part, "thought", False):
+                    continue
+                if hasattr(part, "text") and part.text:
+                    text += part.text
+        if not text:
+            text = response.text or ""
+
         usage = getattr(response, "usage_metadata", None)
         tokens_in = int(getattr(usage, "prompt_token_count", _approx_tokens(prompt)) or 0)
         tokens_out = int(getattr(usage, "candidates_token_count", _approx_tokens(text)) or 0)
-        return text, tokens_in, tokens_out
 
-    def _openrouter_call(
-        self,
-        model_id: str,
-        prompt: str,
-        response_schema: type[T] | None,
-        api_base: str | None,
-        api_key_env: str | None,
-    ) -> tuple[str, int, int]:
-        """OpenRouter uses OpenAI-compatible Chat Completions."""
-        import json as _json
-        import os as _os
-        import urllib.error
-        import urllib.request
+        # Extract finish reason from Gemini response
+        finish_reason = "STOP"
+        if candidates:
+            reason = getattr(candidates[0], "finish_reason", None)
+            if reason and str(reason).upper() in ("MAX_TOKENS", "2"):
+                finish_reason = "MAX_TOKENS"
 
-        key = _os.environ.get(api_key_env or "OPENROUTER_API_KEY")
-        if not key:
-            raise LLMError(
-                f"OpenRouter requires API key in env var {api_key_env or 'OPENROUTER_API_KEY'}"
-            )
-
-        base = (api_base or "https://openrouter.ai/api/v1").rstrip("/")
-        body: dict[str, Any] = {
-            "model": model_id,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.0,
-        }
-        if response_schema is not None:
-            body["response_format"] = {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": response_schema.__name__,
-                    "schema": response_schema.model_json_schema(),
-                    "strict": True,
-                },
-            }
-
-        req = urllib.request.Request(
-            f"{base}/chat/completions",
-            data=_json.dumps(body).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {key}",
-                "HTTP-Referer": "https://github.com/marrow",
-                "X-Title": "Marrow",
-            },
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=600) as resp:
-                raw = _json.loads(resp.read().decode("utf-8"))
-        except urllib.error.URLError as e:
-            raise LLMError(f"openrouter request failed: {e}") from e
-
-        choice = raw.get("choices", [{}])[0]
-        text = choice.get("message", {}).get("content", "")
-        usage = raw.get("usage", {})
-        return text, int(usage.get("prompt_tokens", 0)), int(usage.get("completion_tokens", 0))
-
-    def _vllm_call(
-        self, model_id: str, prompt: str, response_schema: type[T] | None
-    ) -> tuple[str, int, int]:
-        # vLLM path deprecated in favor of ollama/gemini/openrouter. Falls back to stub.
-        text = self._stub_response(prompt, response_schema)
-        return text, _approx_tokens(prompt), _approx_tokens(text)
+        return LLMResponse(text, tokens_in, tokens_out, finish_reason)
 
     @staticmethod
     def _stub_response(prompt: str, response_schema: type[T] | None) -> str:
         if response_schema is None:
             return f"[stub response to prompt of len {len(prompt)}]"
-        # Construct a minimal valid instance from defaults where possible.
         try:
             instance = response_schema()  # type: ignore[call-arg]
             return instance.model_dump_json()
@@ -437,8 +266,15 @@ class LLMCaller:
     def _validate(response_text: str, response_schema: type[T] | None) -> T | str:
         if response_schema is None:
             return response_text
+        # Strip markdown code fences if the model wrapped JSON in them
+        cleaned = response_text.strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.split("\n")
+            # Remove first line (```json or ```) and last line (```)
+            lines = [l for l in lines if not l.strip().startswith("```")]
+            cleaned = "\n".join(lines).strip()
         try:
-            return response_schema.model_validate_json(response_text)
+            return response_schema.model_validate_json(cleaned)
         except Exception as e:
             raise LLMError(f"Response failed schema validation: {e}\n\n{response_text}") from e
 
@@ -456,6 +292,7 @@ class LLMCaller:
         tokens_out: int,
         usd: float,
         latency_ms: int,
+        finish_reason: str = "STOP",
     ) -> None:
         archive = {
             "call_id": str(call_id),
@@ -469,27 +306,7 @@ class LLMCaller:
             "tokens_out": tokens_out,
             "usd": usd,
             "latency_ms": latency_ms,
+            "finish_reason": finish_reason,
             "timestamp": datetime.now(UTC).isoformat(),
         }
         write_json(self.llm_log_dir / f"{stage}_{call_id}.json", archive)
-
-
-def call(
-    *,
-    working_dir: Path,
-    config: MarrowConfig,
-    stage: str,
-    prompt: str,
-    model_role: str,
-    response_schema: type[T] | None = None,
-    chunk_uuids: list[UUID] | None = None,
-) -> T | str:
-    """Functional entry point. Stages should prefer this over instantiating LLMCaller."""
-    caller = LLMCaller(working_dir, config)
-    return caller.call(
-        stage=stage,
-        prompt=prompt,
-        model_role=model_role,
-        response_schema=response_schema,
-        chunk_uuids=chunk_uuids,
-    )

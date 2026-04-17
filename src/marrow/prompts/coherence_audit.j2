@@ -1,0 +1,43 @@
+You are performing the final coherence audit of a book-length distillation. A reader will consume this document instead of the source book. Your job is to find issues that chapter-by-chapter generation cannot catch.
+
+You have access to:
+1. The full distillation draft (ALL chapters).
+2. The spine for each chapter (what each chapter promised to preserve).
+3. A list of spine items that a deterministic check flagged as potentially missing.
+
+Your job is to evaluate THREE things (NOT missing spine items — that check is already done):
+
+1. VOICE_DRIFT: Chapters where the authorial voice has drifted noticeably. The distillation should feel like one book, not a patchwork of different writing styles. For each instance, describe the direction of drift (too formal, too chatty, too mechanical, lost the author's distinctive cadence, etc.).
+
+2. BROKEN_THREADS: References or callbacks in later chapters that assume content in earlier chapters, but that content was cut. Cross-chapter narrative arcs that were severed. For each, identify the calling chapter and the target chapter.
+
+3. REDUNDANCY: Places where a concept, framework, or example is explained twice because a later chapter forgot it was covered earlier. For each, identify both chapters and the repeated concept.
+
+FLAGGED POTENTIALLY MISSING SPINE ITEMS (verify these):
+{% for item in flagged_items %}
+- Chapter "{{ item.chapter_title }}": {{ item.item_type }} — {{ item.item_description }}
+{% endfor %}
+
+CHAPTER SPINES:
+{% for cs in spines %}
+### {{ cs.chapter_title }}
+Thesis: {{ cs.thesis }}
+Frameworks: {{ cs.frameworks | map(attribute='name') | join(', ') }}
+Key examples: {{ cs.key_examples | map(attribute='label') | join(', ') }}
+{% endfor %}
+
+FULL DRAFT:
+{{ draft }}
+
+Return a JSON object:
+{
+  "missing_spine_items": [{"chapter_title": "...", "item_type": "framework|example|key_term|argumentative_move", "item_description": "...", "severity": "critical|minor"}],
+  "voice_drift": [{"chapter_title": "...", "description": "..."}],
+  "broken_threads": [{"description": "...", "chapters_involved": ["...", "..."]}],
+  "redundancies": [{"description": "...", "chapters_involved": ["...", "..."]}],
+  "overall_pass": true/false
+}
+
+Set overall_pass to false if there are any critical missing items, any broken threads, or more than 2 voice drift instances. Minor issues alone do not fail.
+
+No preamble. JSON only.

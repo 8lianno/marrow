@@ -2,23 +2,31 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from marrow.config import load_config
 
 
 def test_defaults_load() -> None:
     cfg = load_config()
-    assert cfg.mode == "host"
-    assert cfg.cost.max_per_book == 4.00
-    assert cfg.host.default_batch_size == 4
-    assert cfg.host.task_timeout_seconds == 3600.0
-    assert cfg.host.allow_stub_fallback is False
+    assert cfg.cost.max_per_book == 3.00
+    assert cfg.distill.compression_ratio == 0.30
+    assert cfg.distill.max_continuation_rounds == 5
+    assert cfg.coherence.max_fix_rounds == 2
+
+
+def test_model_defaults() -> None:
+    cfg = load_config()
+    assert cfg.models.spine.provider == "gemini"
+    assert cfg.models.spine.model_id == "gemini-2.5-flash"
+    assert cfg.models.spine.thinking is True
+    assert cfg.models.distill.provider == "gemini"
+    assert cfg.models.distill.model_id == "gemini-2.5-pro"
+    assert cfg.models.distill.thinking is False
+    assert cfg.models.coherence.provider == "anthropic"
+    assert cfg.models.coherence.model_id == "claude-sonnet-4-6"
 
 
 def test_overrides_apply() -> None:
-    cfg = load_config(overrides={"mode": "api", "cost": {"max_per_book": 7.5}})
-    assert cfg.mode == "api"
+    cfg = load_config(overrides={"cost": {"max_per_book": 7.5}})
     assert cfg.cost.max_per_book == 7.5
 
 
@@ -36,48 +44,6 @@ def test_cli_overrides_beat_env(monkeypatch) -> None:
     assert cfg.cost.max_per_book == 1.00
 
 
-def test_cheap_extends_default(tmp_path: Path) -> None:
-    cfg = load_config(config_path=Path("configs/cheap.yaml"))
-    assert cfg.mode == "host"
-    assert cfg.cost.max_per_book == 0.50  # cheap.yaml override
-    assert cfg.chunk.window_tokens == 4096  # inherited from default
-
-
-def test_ollama_preset_is_explicit_api_mode() -> None:
-    cfg = load_config(config_path=Path("configs/ollama.yaml"))
-    assert cfg.mode == "api"
-    assert cfg.models.synthesis.provider == "ollama"
-    assert cfg.models.synthesis.model_id == "qwen3:14b"
-
-
-def test_express_preset_disables_validate_and_evaluate() -> None:
-    """US-011: express.yaml sets max_iterations=0 and evaluate.skip=True."""
-    cfg = load_config(config_path=Path("configs/express.yaml"))
-    assert cfg.validate_.max_iterations == 0
-    assert cfg.evaluate.skip is True
-    # Everything else inherits from default.
-    assert cfg.mode == "host"
-    assert cfg.chunk.window_tokens == 4096
-
-
-def test_evaluate_skip_defaults_false() -> None:
-    cfg = load_config()
-    assert cfg.evaluate.skip is False
-
-
-def test_monitor_config_defaults() -> None:
-    """US-013: monitor defaults to cwd-relative ./inbox and ./briefs."""
-    cfg = load_config()
-    assert cfg.monitor.input_dir == "inbox"
-    assert cfg.monitor.output_dir == "briefs"
-    assert cfg.monitor.poll_interval_seconds == 5.0
-    assert ".pdf" in cfg.monitor.supported_extensions
-
-
-def test_chunk_defaults_use_optimized_window() -> None:
-    """US-012: 4096-token window reduces extraction calls ~8x vs. 512 baseline."""
-    cfg = load_config()
-    assert cfg.chunk.window_tokens == 4096
-    assert cfg.chunk.overlap_pct == 0.10
-    # Must stay within Jina v2 context limit (see src/marrow/embed.py max_seq_length).
-    assert cfg.chunk.window_tokens <= 8192
+def test_compression_override() -> None:
+    cfg = load_config(overrides={"distill": {"compression_ratio": 0.50}})
+    assert cfg.distill.compression_ratio == 0.50

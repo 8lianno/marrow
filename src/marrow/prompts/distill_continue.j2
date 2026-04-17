@@ -1,0 +1,20 @@
+You are continuing a chapter distillation that was truncated mid-output. Read the partial output below, then continue writing where it left off. Match the voice, pick up the argumentative thread mid-sentence if necessary, and work toward the remaining spine items.
+
+REMAINING SPINE ITEMS TO COVER:
+{% for item in remaining_items %}
+- {{ item }}
+{% endfor %}
+
+PARTIAL OUTPUT SO FAR ({{ current_word_count }} words):
+{{ partial_output }}
+
+TARGET TOTAL LENGTH: {{ target_words }} words. You need approximately {{ remaining_words }} more words.
+
+RULES:
+1. Continue from EXACTLY where the partial output ends. Do not restart the chapter. Do not repeat any content.
+2. Do not add transitional meta-text like "continuing from above" or "as discussed".
+3. Maintain the same voice, tone, and style as the partial output.
+4. Include paragraph citations [p:id1, p:id2] at the end of each paragraph.
+5. Cover the remaining spine items listed above.
+
+Continue writing now. No preamble.

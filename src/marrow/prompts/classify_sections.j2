@@ -1,0 +1,32 @@
+You are classifying the top-level sections of a non-fiction book by their structural role. This classification determines how aggressively each section will be compressed during distillation.
+
+Classify each section as one of:
+- "intro": Introduction, preface, prologue — sets up the book but mostly redundant with body chapters
+- "body": Core argumentative chapters — the load-bearing content
+- "conclusion": Conclusion, epilogue, afterword — recaps or extends body content
+- "appendix": Appendix, reference tables, glossary — often the densest content, compress least
+- "foreword": Foreword by someone else — compress heavily or skip
+- "other": Acknowledgments, bibliography, index, about the author — compress heavily
+
+Rules:
+1. When in doubt, classify as "body" — it's the safest default.
+2. A section titled "Introduction" that actually introduces novel frameworks should be "body", not "intro".
+3. Look at the preview text to judge whether the section carries original argument or is setup/recap.
+
+BOOK TITLE: {{ book_title }}
+
+SECTIONS:
+{% for section in sections %}
+---
+Section {{ loop.index }}: "{{ section.title }}"
+Preview (first ~200 words):
+{{ section.preview }}
+---
+{% endfor %}
+
+Return a JSON array of objects, one per section, each with:
+- "section_id": the section_id exactly as provided
+- "title": the section title
+- "section_type": one of "intro", "body", "conclusion", "appendix", "foreword", "other"
+
+No preamble, no commentary. JSON array only.
