@@ -59,7 +59,7 @@ marrow/
 │   ├── cli.py                 # Typer: marrow <book.pdf>
 │   ├── config.py              # MarrowConfig + YAML loader
 │   ├── orchestrator.py        # Stage discovery, checkpointing
-│   ├── llm.py                 # Gemini + Anthropic wrapper (thinking support)
+│   ├── llm.py                 # Gemini + Codex + stub providers
 │   ├── schemas/
 │   │   ├── document.py        # CanonicalDocument, SectionNode, ParagraphNode
 │   │   ├── classify.py        # SectionClassification, BookClassification

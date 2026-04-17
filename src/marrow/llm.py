@@ -237,17 +237,13 @@ class LLMCaller:
         response_schema: type[T] | None,
         max_tokens: int,  # ignored — codex runs until done
     ) -> LLMResponse:
-        """Invoke `codex exec` as a subprocess.
-
-        Uses the user's ChatGPT/Codex subscription authentication (no API key
-        required). Prompt is piped via stdin to avoid arg-length limits on
-        large Stage 4 distill prompts.
-        """
+        """Invoke `codex exec` as a subprocess with progress logging."""
         import json as _json
         import os as _os
         import shutil as _shutil
         import subprocess
         import tempfile
+        import threading
 
         if _shutil.which("codex") is None:
             raise LLMError(
@@ -277,20 +273,53 @@ class LLMCaller:
             cmd.extend(["--output-schema", schema_path])
         cmd.append("-")  # read prompt from stdin
 
+        TIMEOUT_S = 1200
+        LOG_INTERVAL_S = 15
+
         try:
-            result = subprocess.run(
+            proc = subprocess.Popen(
                 cmd,
-                input=prompt,
-                capture_output=True,
-                text=True,
-                timeout=1200,  # 20-minute ceiling per call
-                encoding="utf-8",
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding="utf-8",
             )
-        except subprocess.TimeoutExpired as e:
-            raise LLMError(
-                f"codex exec timed out after 20 minutes. "
-                f"Prompt length: {len(prompt)} chars."
-            ) from e
+
+            def _write_stdin():
+                try:
+                    proc.stdin.write(prompt)
+                    proc.stdin.close()
+                except Exception:
+                    pass
+            threading.Thread(target=_write_stdin, daemon=True).start()
+
+            start = time.perf_counter()
+            last_log = start
+
+            while proc.poll() is None:
+                elapsed = time.perf_counter() - start
+                if elapsed > TIMEOUT_S:
+                    proc.kill()
+                    proc.wait(timeout=5)
+                    raise LLMError(f"codex exec timed out after {TIMEOUT_S}s")
+                if time.perf_counter() - last_log > LOG_INTERVAL_S:
+                    log.info("codex_exec_progress", elapsed_s=f"{elapsed:.0f}")
+                    last_log = time.perf_counter()
+                time.sleep(0.5)
+
+            stdout_text = (proc.stdout.read() if proc.stdout else "").strip()
+            stderr_text = (proc.stderr.read() if proc.stderr else "")
+            returncode = proc.returncode
+
+            log.info(
+                "codex_exec_completed",
+                model_id=model_id,
+                elapsed_s=f"{time.perf_counter() - start:.1f}",
+                prompt_chars=len(prompt),
+                response_chars=len(stdout_text),
+            )
+
+        except KeyboardInterrupt:
+            log.warning("codex_exec_interrupted")
+            raise
         finally:
             if schema_path is not None:
                 try:
@@ -298,20 +327,28 @@ class LLMCaller:
                 except OSError:
                     pass
 
-        stderr_tail = (result.stderr or "")[-2000:]
-        stdout_text = (result.stdout or "").strip()
+        stderr_tail = stderr_text[-2000:] if stderr_text else ""
 
-        if result.returncode != 0:
+        if returncode != 0:
             lowered = stderr_tail.lower()
-            if any(k in lowered for k in ("rate limit", "quota", "usage limit", "too many requests")):
+            quota_patterns = (
+                "rate limit", "quota", "usage limit", "too many requests",
+                "usage cap", "try again later",
+            )
+            if any(k in lowered for k in quota_patterns):
                 from marrow.errors import BudgetExceeded
 
                 raise BudgetExceeded(
-                    f"Codex subscription quota exhausted. "
-                    f"Wait or switch to provider=gemini. stderr:\n{stderr_tail}"
+                    f"Codex quota exhausted. Wait or use "
+                    f"`--config configs/gemini.yaml`. stderr:\n{stderr_tail}"
+                )
+            if any(k in lowered for k in ("login", "authenticate", "unauthorized", "not logged in")):
+                raise LLMError(
+                    f"Codex auth failed. Run `codex login` and try again. "
+                    f"stderr:\n{stderr_tail}"
                 )
             raise LLMError(
-                f"codex exec failed (exit {result.returncode}):\n{stderr_tail}"
+                f"codex exec failed (exit {returncode}):\n{stderr_tail}"
             )
 
         if not stdout_text:

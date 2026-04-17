@@ -82,6 +82,8 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
     out_dir = working_dir / STAGE_NAME
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # Build work items (cheap prep)
+    work_items = []
     for idx, section in enumerate(doc.toc, 1):
         paragraphs = _flatten_paragraphs(section)
         word_count = sum(len(p.text.split()) for p in paragraphs)
@@ -91,57 +93,73 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
         if word_count < 50:
             warnings.append(f"skipping_short_section: '{section.title}' has only {word_count} words")
             continue
+        work_items.append((idx, section, paragraphs, word_count, compression, target_words))
 
-        log.info(
-            "chapter_spine_extracting",
-            chapter=section.title,
-            index=idx,
-            word_count=word_count,
-        )
+    def _extract_one(item):
+        idx, section, paragraphs, wc, comp, tgt = item
+        log.info("chapter_spine_extracting", chapter=section.title, index=idx, word_count=wc)
 
         prompt = render(
             "spine_extract.j2",
             chapter=section,
             chapter_index=idx,
-            word_count=word_count,
+            word_count=wc,
             paragraphs=paragraphs,
             section_id=str(section.section_id),
-            compression_pct=int(compression * 100),
+            compression_pct=int(comp * 100),
         )
 
         try:
-            spine_result = _extract_spine(caller, prompt, STAGE_NAME)
-        except Exception as first_err:
-            # Retry with shorter limits
+            result = _extract_spine(caller, prompt, STAGE_NAME)
+        except Exception:
             log.warning("chapter_spine_retrying", chapter=section.title)
             retry_prompt = (
                 prompt
-                + "\n\nIMPORTANT: Your previous response was truncated. "
-                "Return SHORTER output: max 3 frameworks, 3 examples, 5 moves, 3 terms. "
-                "Use 1 paragraph_id per item. Keep descriptions under 15 words."
+                + "\n\nIMPORTANT: Your previous response was not valid JSON. "
+                "Return ONLY a JSON object matching the schema above. No preamble, "
+                "no markdown code fences, no commentary. Start with { and end with }."
             )
             try:
-                spine_result = _extract_spine(caller, retry_prompt, STAGE_NAME)
-            except Exception as retry_err:
-                log.warning(
-                    "chapter_spine_failed",
-                    chapter=section.title,
-                    error=str(retry_err),
-                )
+                result = _extract_spine(caller, retry_prompt, STAGE_NAME)
+            except Exception as e:
+                log.warning("chapter_spine_failed", chapter=section.title, error=str(e))
                 failed_dir = out_dir / "failed"
                 failed_dir.mkdir(parents=True, exist_ok=True)
-                write_text(failed_dir / f"chapter_{idx}_error.txt", str(retry_err))
-                warnings.append(f"spine_extraction_failed: '{section.title}'")
-                continue
+                write_text(failed_dir / f"chapter_{idx}_error.txt", str(e))
+                return (idx, section, None, wc, tgt)
 
-        # Ensure target words are set correctly (model may not return these)
-        spine_result.source_word_count = word_count
-        spine_result.target_word_count = target_words
-        spine_result.section_id = section.section_id
+        result.source_word_count = wc
+        result.target_word_count = tgt
+        result.section_id = section.section_id
 
-        chapter_spines.append(spine_result)
-        total_source += word_count
-        total_target += target_words
+        log.info(
+            "chapter_spine_extracted",
+            chapter=section.title,
+            frameworks=len(result.frameworks),
+            examples=len(result.key_examples),
+            moves=len(result.argumentative_moves),
+            terms=len(result.key_terms),
+        )
+        return (idx, section, result, wc, tgt)
+
+    # Parallel extraction (subprocess.run releases the GIL)
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    indexed_results = []
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        futures = [ex.submit(_extract_one, w) for w in work_items]
+        for future in as_completed(futures):
+            indexed_results.append(future.result())
+
+    # Re-sort by chapter index and collect results
+    indexed_results.sort(key=lambda x: x[0])
+    for idx, section, result, wc, tgt in indexed_results:
+        if result is None:
+            warnings.append(f"spine_extraction_failed: '{section.title}'")
+            continue
+        chapter_spines.append(result)
+        total_source += wc
+        total_target += tgt
 
         log.info(
             "chapter_spine_extracted",

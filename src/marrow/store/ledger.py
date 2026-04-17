@@ -1,9 +1,13 @@
-"""SQLite cost ledger for LLM call accounting and budget enforcement."""
+"""SQLite cost ledger for LLM call accounting and budget enforcement.
+
+Thread-safe: all writes go through a threading.Lock and SQLite WAL mode.
+"""
 
 from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from collections.abc import Iterable
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -43,12 +47,15 @@ class CostLedger:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
 
     @contextmanager
     def _connect(self) -> Iterable[sqlite3.Connection]:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
         try:
             yield conn
             conn.commit()
@@ -71,7 +78,7 @@ class CostLedger:
         retry_count: int = 0,
     ) -> UUID:
         call_id = uuid4()
-        with self._connect() as conn:
+        with self._lock, self._connect() as conn:
             conn.execute(
                 """INSERT INTO llm_calls
                 (call_id, stage, model_role, model_id, provider, tokens_in, tokens_out,
@@ -122,7 +129,7 @@ class CostLedger:
         return int(row[0]), int(row[1])
 
     def record_budget_event(self, event_type: str, cost_so_far: float, cost_cap: float) -> None:
-        with self._connect() as conn:
+        with self._lock, self._connect() as conn:
             conn.execute(
                 """INSERT INTO budget_events
                 (event_id, event_type, cost_so_far, cost_cap, created_at)

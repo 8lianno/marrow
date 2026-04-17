@@ -237,24 +237,36 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
     chapter_distillations: list[ChapterDistillation] = []
     total_words = 0
 
+    # Build work items
+    work_items = []
     for idx, section in enumerate(doc.toc, 1):
         sid = str(section.section_id)
         chapter_spine = spine_map.get(sid)
         if chapter_spine is None:
             warnings.append(f"no_spine_for_section: '{section.title}' (skipped in spine extraction)")
             continue
+        work_items.append((idx, section, chapter_spine))
 
-        distillation = _distill_chapter(
-            caller=caller,
-            section=section,
-            spine=chapter_spine,
-            classification=classification,
-            config=config,
-            out_dir=out_dir,
-            chapter_idx=idx,
+    def _distill_one(item):
+        idx, section, chapter_spine = item
+        return idx, _distill_chapter(
+            caller=caller, section=section, spine=chapter_spine,
+            classification=classification, config=config,
+            out_dir=out_dir, chapter_idx=idx,
         )
-        chapter_distillations.append(distillation)
-        total_words += distillation.word_count
+
+    # Parallel distillation (subprocess.run releases the GIL)
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    indexed = []
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        futures = [ex.submit(_distill_one, w) for w in work_items]
+        for future in as_completed(futures):
+            indexed.append(future.result())
+
+    indexed.sort(key=lambda x: x[0])
+    chapter_distillations = [d for _, d in indexed]
+    total_words = sum(d.word_count for d in chapter_distillations)
 
     full_distillation = Distillation(
         book_slug=doc.book_slug,

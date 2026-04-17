@@ -138,24 +138,30 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
                 sc.section_type = "body"
                 sc.compression_ratio = config.distill.compression_ratio
 
-    # Pre-flight cost estimation
-    # Rough model: input tokens ≈ word_count × 1.3, output ≈ word_count × compression × 1.3
-    # Spine: input = full text, output = ~10% of input (JSON)
-    # Distill: input = full text + spine, output = compressed text
-    # Coherence: input = compressed text + spines, output = small JSON
+    # Pre-flight cost estimation — only count metered (gemini) stages
+    def _role_is_metered(role: str) -> bool:
+        route = getattr(config.models, role, None)
+        return route is not None and route.provider == "gemini"
+
     input_tokens_est = int(doc.word_count * 1.3)
     output_tokens_est = int(doc.word_count * config.distill.compression_ratio * 1.3)
-    spine_cost = input_tokens_est * 0.00015 / 1000 + (input_tokens_est * 0.1) * 0.0006 / 1000
-    distill_cost = input_tokens_est * 0.00125 / 1000 + output_tokens_est * 0.005 / 1000
-    coherence_cost = output_tokens_est * 0.003 / 1000 + 5000 * 0.015 / 1000
-    projected_cost = spine_cost + distill_cost + coherence_cost
+    projected_cost = 0.0
+    if _role_is_metered("spine"):
+        projected_cost += (input_tokens_est * 0.0006 + input_tokens_est * 0.1 * 0.0006) / 1000
+    if _role_is_metered("distill"):
+        projected_cost += (input_tokens_est * 0.0006 + output_tokens_est * 0.0006) / 1000
+    if _role_is_metered("coherence"):
+        projected_cost += (output_tokens_est * 0.0006 + 5000 * 0.0006) / 1000
+
+    metered_roles = [r for r in ("spine", "distill", "coherence") if _role_is_metered(r)]
     ceiling = config.cost.max_per_book
 
     log.info(
         "cost_estimate",
-        projected_usd=f"${projected_cost:.2f}",
+        projected_usd=f"${projected_cost:.3f}",
         ceiling_usd=f"${ceiling:.2f}",
         source_words=doc.word_count,
+        metered_roles=metered_roles,
     )
 
     if projected_cost > ceiling * 1.2:
@@ -163,8 +169,7 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
 
         raise CostCeilingHit(
             f"Projected cost ${projected_cost:.2f} exceeds ceiling ${ceiling:.2f} by >20%. "
-            f"Source: {doc.word_count} words. "
-            f"Raise MARROW_COST_MAX_PER_BOOK or use --compression {config.distill.compression_ratio * 0.7:.2f} to reduce scope."
+            f"Source: {doc.word_count} words."
         )
 
     out_dir = working_dir / STAGE_NAME

@@ -199,7 +199,8 @@ def _fix_chapter(
         max_tokens=chapter_spine.target_word_count * 2,  # generous ceiling
     )
 
-    body_text = fixed_text if isinstance(fixed_text, str) else str(fixed_text)
+    assert isinstance(fixed_text, str), f"Expected str, got {type(fixed_text).__name__}"
+    body_text = fixed_text.strip()
     return ChapterDistillation(
         chapter_title=chapter_dist.chapter_title,
         section_id=chapter_dist.section_id,
@@ -219,10 +220,13 @@ def _strip_citations(text: str) -> str:
 
 def _render_distillation_md(
     distillation: Distillation,
+    spine: Spine,
     doc: CanonicalDocument,
     slug: str,
 ) -> str:
-    """Render the final distillation as Obsidian markdown."""
+    """Render the final distillation as Obsidian markdown with spine callouts."""
+    spine_map = {str(cs.section_id): cs for cs in spine.chapters}
+
     lines: list[str] = []
     lines.append(f"# {doc.book_title}")
     lines.append("")
@@ -237,12 +241,37 @@ def _render_distillation_md(
     lines.append("")
 
     for cd in distillation.chapters:
+        lines.append(f"## {cd.chapter_title}")
+        lines.append("")
+
+        # Collapsible spine callout
+        chapter_spine = spine_map.get(str(cd.section_id))
+        if chapter_spine:
+            lines.append("> [!abstract]- Spine")
+            lines.append(f"> **Thesis:** {chapter_spine.thesis}")
+            if chapter_spine.frameworks:
+                fw = ", ".join(f.name for f in chapter_spine.frameworks)
+                lines.append(">")
+                lines.append(f"> **Frameworks:** {fw}")
+            if chapter_spine.key_examples:
+                ex = ", ".join(e.label for e in chapter_spine.key_examples)
+                lines.append(">")
+                lines.append(f"> **Key examples:** {ex}")
+            if chapter_spine.argumentative_moves:
+                lines.append(">")
+                lines.append("> **Argument flow:**")
+                for i, move in enumerate(chapter_spine.argumentative_moves, 1):
+                    lines.append(f"> {i}. {move}")
+            lines.append("")
+
         # Convert [p:uuid] citations to Obsidian wikilinks
         body = re.sub(
             r'\[p:([a-f0-9-]+)\]',
             rf'[[{slug}.source#^\1|↗]]',
             cd.body_md,
         )
+        # Strip leading "## <title>" the distill prompt produces (we already emitted it)
+        body = re.sub(r'^##\s+' + re.escape(cd.chapter_title) + r'\s*\n', '', body)
         lines.append(body)
         lines.append("")
 
@@ -287,6 +316,9 @@ blockquote { border-left: 3px solid #ccc; padding-left: 1em; color: #555; margin
 ol { padding-left: 1.5em; }
 li { margin-bottom: 0.3em; }
 hr { border: none; border-top: 1px solid #ddd; margin: 2em 0; }
+.spine-callout { background: #f5f5f0; border-left: 4px solid #888; padding: 0.5em 1em; margin: 0 0 1.5em 0; font-size: 0.9em; color: #444; }
+.spine-callout p { margin: 0.4em 0; }
+.spine-callout ol { margin: 0.3em 0 0.3em 1.5em; }
 """,
     )
     book.add_item(css)
@@ -311,11 +343,10 @@ Generated {datetime.now(UTC).strftime('%Y-%m-%d')}.</p>
     epub_chapters.append(title_page)
 
     # Distillation chapters
+    spine_map = {str(cs.section_id): cs for cs in spine.chapters}
+
     for i, cd in enumerate(distillation.chapters, 1):
         clean_body = _strip_citations(cd.body_md)
-        # Convert markdown paragraphs to HTML, stripping the leading heading
-        # (the distill prompt produces "## Chapter Title" which we handle via
-        # the EPUB chapter title — don't duplicate it)
         paragraphs = clean_body.split("\n\n")
         body_html = ""
         first_heading_stripped = False
@@ -325,16 +356,34 @@ Generated {datetime.now(UTC).strftime('%Y-%m-%d')}.</p>
                 continue
             if not first_heading_stripped and para.startswith(("#", "##")):
                 first_heading_stripped = True
-                continue  # skip — the EPUB chapter title handles this
+                continue
             if para.startswith("### "):
                 body_html += f"<h3>{para[4:]}</h3>\n"
             elif para.startswith("## "):
-                body_html += f"<h3>{para[3:]}</h3>\n"  # demote to h3 inside chapter
+                body_html += f"<h3>{para[3:]}</h3>\n"
             else:
-                # Handle bold and italic markdown
                 para = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", para)
                 para = re.sub(r"\*(.+?)\*", r"<em>\1</em>", para)
                 body_html += f"<p>{para}</p>\n"
+
+        # Per-chapter spine callout
+        chapter_spine = spine_map.get(str(cd.section_id))
+        spine_block = ""
+        if chapter_spine:
+            spine_block = '<div class="spine-callout">\n'
+            spine_block += f'<p><strong>Thesis:</strong> {chapter_spine.thesis}</p>\n'
+            if chapter_spine.frameworks:
+                names = ", ".join(f.name for f in chapter_spine.frameworks)
+                spine_block += f'<p><strong>Frameworks:</strong> {names}</p>\n'
+            if chapter_spine.key_examples:
+                labels = ", ".join(e.label for e in chapter_spine.key_examples)
+                spine_block += f'<p><strong>Key examples:</strong> {labels}</p>\n'
+            if chapter_spine.argumentative_moves:
+                spine_block += '<p><strong>Argument flow:</strong></p>\n<ol>\n'
+                for move in chapter_spine.argumentative_moves:
+                    spine_block += f'<li>{move}</li>\n'
+                spine_block += '</ol>\n'
+            spine_block += '</div>\n'
 
         chapter_title = cd.chapter_title
         ch = epub.EpubHtml(
@@ -342,7 +391,7 @@ Generated {datetime.now(UTC).strftime('%Y-%m-%d')}.</p>
             file_name=f"chapter_{i:02d}.xhtml",
             lang="en",
         )
-        ch.content = f"<html><body><h2>{chapter_title}</h2>\n{body_html}</body></html>".encode("utf-8")
+        ch.content = f"<html><body><h2>{chapter_title}</h2>\n{spine_block}{body_html}</body></html>".encode("utf-8")
         ch.add_item(css)
         book.add_item(ch)
         epub_chapters.append(ch)
@@ -561,7 +610,7 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
     # Phase D: Assemble output
     slug = doc.book_slug
 
-    distillation_md = _render_distillation_md(final_distillation, doc, slug)
+    distillation_md = _render_distillation_md(final_distillation, spine, doc, slug)
     spine_md = _render_spine_md(spine, doc)
     source_md = _render_source_md(doc)
 

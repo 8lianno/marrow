@@ -114,11 +114,28 @@ def _book_to_slug(book: str) -> str:
 
 
 def _print_summary(manifest: RunManifest) -> None:
+    import sqlite3
+
     table = Table(title=f"Run: {manifest.book_slug}")
     table.add_column("Stage")
     table.add_column("Status", justify="center")
     table.add_column("Duration (s)", justify="right")
-    table.add_column("Cost (USD)", justify="right")
+    table.add_column("Calls", justify="right")
+    table.add_column("USD", justify="right")
+
+    # Pull call counts from ledger
+    working_dir = Path(manifest.config.get("runs_dir", "runs")) / manifest.book_slug
+    stage_calls: dict[str, int] = {}
+    ledger_path = working_dir / "cost_ledger.sqlite"
+    if ledger_path.exists():
+        try:
+            with sqlite3.connect(str(ledger_path)) as conn:
+                stage_calls = dict(conn.execute(
+                    "SELECT stage, COUNT(*) FROM llm_calls GROUP BY stage"
+                ).fetchall())
+        except Exception:
+            pass
+
     for r in manifest.stage_results:
         status_color = {"success": "green", "warning": "yellow", "failed": "red"}.get(
             r.status, "white"
@@ -127,7 +144,8 @@ def _print_summary(manifest: RunManifest) -> None:
             r.stage_name,
             f"[{status_color}]{r.status}[/{status_color}]",
             f"{r.duration_seconds:.2f}",
-            f"{r.cost_usd:.4f}",
+            str(stage_calls.get(r.stage_name, 0)),
+            f"${r.cost_usd:.4f}",
         )
     console.print(table)
     console.print(
