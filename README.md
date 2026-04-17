@@ -13,35 +13,122 @@ Not a summary. A distillation — the same book, compressed to 30%.
 
 ## How it works
 
-Marrow separates **selection** (what to keep) from **generation** (how to write it)
-using a spine architecture:
+Marrow separates **selection** (what to keep) from **generation** (how to write it).
+The core insight: deciding what's load-bearing is a different cognitive job than
+compressing it into prose. Split them, and both get better.
 
-```
-book.pdf
-  → 1. Ingest    Docling parses chapters, paragraphs, pages
-  → 2. Classify  Flash labels sections: intro / body / appendix / ...
-  → 3. Spine     Flash-thinking extracts the structural skeleton
-  → 4. Distill   Pro compresses each chapter against its spine
-  → 5. Coherence Sonnet audits the whole book, Pro fixes gaps
-  → runs/<slug>/05_coherence/<slug>.md (~90 pages)
+```mermaid
+graph TD
+    BOOK["📕 Book<br/><i>300 pages</i>"]:::input
+
+    subgraph PARSE ["1 — Parse"]
+        direction TB
+        INGEST["Ingest<br/><sub>Docling extracts chapters,<br/>paragraphs, page numbers</sub>"]:::parse
+        CLASSIFY["Classify<br/><sub>Which sections are intro,<br/>body, appendix, conclusion?</sub>"]:::parse
+        INGEST --> CLASSIFY
+    end
+
+    subgraph SELECT ["2 — Select what matters"]
+        direction TB
+        SPINE["Spine Extraction<br/><sub>Per chapter: what's the thesis?<br/>Which frameworks, examples,<br/>terms are load-bearing?</sub>"]:::select
+        SPINE_OUT(["📋 Spine<br/><i>structural skeleton</i>"]):::artifact
+        SPINE --> SPINE_OUT
+    end
+
+    subgraph GENERATE ["3 — Generate the distillation"]
+        direction TB
+        DISTILL["Distill<br/><sub>Rewrite each chapter at 30%<br/>length, covering every<br/>spine item, matching<br/>the author's voice</sub>"]:::generate
+        CONTINUE{"Long<br/>chapter?"}:::decision
+        DISTILL --> CONTINUE
+        CONTINUE -->|"yes"| LOOP["Continue writing<br/><sub>pick up where output<br/>was truncated</sub>"]:::generate
+        LOOP --> CONTINUE
+        CONTINUE -->|"no"| DRAFT(["📝 Draft<br/><i>~90 pages</i>"]):::artifact
+    end
+
+    subgraph VERIFY ["4 — Verify & fix"]
+        direction TB
+        CHECK["Coverage Check<br/><sub>Is every spine item<br/>in the draft?<br/>(deterministic match)</sub>"]:::verify
+        AUDIT["Coherence Audit<br/><sub>Voice drift? Broken<br/>cross-chapter threads?<br/>Redundancy?</sub>"]:::verify
+        FIX["Fix-ups<br/><sub>Rewrite only the<br/>flagged chapters</sub>"]:::generate
+        CHECK --> AUDIT
+        AUDIT -->|"issues found"| FIX
+    end
+
+    OUTPUT["📗 Distillation<br/><i>~90 pages, Obsidian markdown<br/>every paragraph traced to source</i>"]:::output
+
+    BOOK --> PARSE
+    PARSE --> SELECT
+    SELECT --> GENERATE
+    SPINE_OUT -.->|"distill against"| DISTILL
+    SPINE_OUT -.->|"verify against"| CHECK
+    GENERATE --> VERIFY
+    AUDIT -->|"pass"| OUTPUT
+    FIX --> OUTPUT
+
+    classDef input fill:#1a1a2e,stroke:#e94560,color:#fff,stroke-width:2px
+    classDef parse fill:#16213e,stroke:#0f3460,color:#fff
+    classDef select fill:#1a1a2e,stroke:#e94560,color:#fff
+    classDef generate fill:#0f3460,stroke:#533483,color:#fff
+    classDef verify fill:#1a1a2e,stroke:#e94560,color:#fff
+    classDef artifact fill:#533483,stroke:#e94560,color:#fff,stroke-dasharray: 5 5
+    classDef decision fill:#e94560,stroke:#fff,color:#fff
+    classDef output fill:#16213e,stroke:#e94560,color:#fff,stroke-width:2px
+
+    style PARSE fill:#16213e20,stroke:#0f3460,stroke-width:1px,color:#fff
+    style SELECT fill:#1a1a2e20,stroke:#e94560,stroke-width:1px,color:#fff
+    style GENERATE fill:#0f346020,stroke:#533483,stroke-width:1px,color:#fff
+    style VERIFY fill:#1a1a2e20,stroke:#e94560,stroke-width:1px,color:#fff
 ```
 
-The **spine** is the key artifact — a structured JSON skeleton listing every
+The **spine** is the key artifact — a structured skeleton listing every
 framework, key example, argumentative move, key term, and voice sample per
 chapter. The distillation writes against it, not from scratch. When the output
 is wrong, you can see whether selection or writing failed.
 
-### Model roles
+### What each stage does
 
-| Stage | Model | Job |
-|-------|-------|-----|
-| Classify | Gemini 2.5 Flash | Section-type detection (one call) |
-| Spine | Gemini 2.5 Flash (thinking) | Reasoning about what's load-bearing |
-| Distill | Gemini 2.5 Pro | High-quality prose at 30% compression |
-| Coherence | Claude Sonnet 4.6 | Whole-book audit (one call) |
-| Fix-ups | Gemini 2.5 Pro | Targeted chapter rewrites |
+```mermaid
+graph LR
+    subgraph MODELS ["Models used"]
+        direction TB
+        FLASH["⚡ Gemini Flash<br/><sub>thinking mode</sub>"]:::flash
+        PRO["🔷 Gemini Pro"]:::pro
+        SONNET["🟣 Claude Sonnet"]:::sonnet
+    end
 
-**Cost:** ~$1.50–2.00 per book. **Runtime:** ~15–25 minutes.
+    I["📄 Ingest<br/><sub>no LLM</sub>"]:::stage
+    C["🏷️ Classify"]:::stage
+    S["🦴 Spine"]:::stage
+    D["✍️ Distill"]:::stage
+    V["✅ Coherence"]:::stage
+
+    I -->|"chapters.json"| C
+    C -->|"classification.json"| S
+    S -->|"spine.json"| D
+    D -->|"distillation.json"| V
+
+    FLASH -.-> C
+    FLASH -.-> S
+    PRO -.-> D
+    SONNET -.-> V
+
+    classDef stage fill:#16213e,stroke:#0f3460,color:#fff
+    classDef flash fill:#e94560,stroke:#fff,color:#fff
+    classDef pro fill:#0f3460,stroke:#fff,color:#fff
+    classDef sonnet fill:#533483,stroke:#fff,color:#fff
+
+    style MODELS fill:#1a1a2e20,stroke:#533483,stroke-width:1px
+```
+
+| Stage | Model | What it does | Cost |
+|-------|-------|-------------|------|
+| **Ingest** | — | Docling parses PDF/EPUB into structured chapters with page provenance | $0 |
+| **Classify** | Flash | Labels each section as intro/body/conclusion/appendix (sets compression ratio) | ~$0.02 |
+| **Spine** | Flash (thinking) | Extracts thesis, frameworks, examples, argumentative moves, key terms per chapter | ~$0.10 |
+| **Distill** | Pro | Compresses each chapter to 30% against its spine, matching the author's voice | ~$1.00 |
+| **Coherence** | Sonnet + Pro | Audits whole book for gaps, voice drift, broken threads; Pro fixes flagged chapters | ~$0.50 |
+
+**Total: ~$1.50–2.00 per book. Runtime: ~15–25 minutes.**
 
 ## Quick start
 
