@@ -5,6 +5,77 @@ All notable changes to Marrow will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] — 2026-04-18
+
+Codex-default pipeline with runtime optimization, smart titles, and dual mode.
+
+### Added
+
+- **Codex CLI provider** — spine, distill, and coherence stages routed through
+  `codex exec` by default. $0 marginal cost (ChatGPT subscription). Classify
+  stays on Gemini Flash Lite (~$0.001/book).
+- **Parallel stages** — spine extraction and distillation run 3 chapters
+  concurrently via `ThreadPoolExecutor`. Thread-safe SQLite ledger with WAL mode.
+- **Auto-resume** — if a run crashes at stage 4, re-running the same command
+  skips completed stages automatically. No `--resume` flag needed.
+- **Brief mode** (`--brief`) — ~20% compression, skeleton-only output. Default
+  full mode unchanged at ~30%.
+- **Smart chapter titles** — generic auto-split names ("Introduction Part N")
+  replaced with meaningful titles from the spine's first framework name.
+- **Section headings** — distilled chapters include `###` headings for topic
+  shifts, making output scannable.
+- **Spine callouts** — each chapter in both `.md` (Obsidian collapsible) and
+  `.epub` (styled div) shows thesis, frameworks, and key examples at the top.
+- **EPUB export** — clean `.epub` with proper CSS, chapter navigation, spine
+  callouts, and a spine appendix. No citation clutter.
+- **Per-call reasoning effort override** — codex calls run at `medium` effort
+  regardless of user's global config, cutting per-call time from 5-15 min to
+  ~1 min without changing `~/.codex/config.toml`.
+- **Coherence excerpt mode** — audit sends chapter excerpts (first/last 200
+  words) instead of full 25K-word draft, reducing coherence call from 20+ min
+  to ~1 min.
+- **Progress logging** — codex calls emit `codex_exec_progress` every 15s
+  and `codex_exec_completed` with elapsed time and response size.
+- **CLI call count column** — end-of-run summary shows LLM call count per stage.
+- **Auth/quota error detection** — clear error messages for codex login failures
+  and subscription quota exhaustion.
+- **Gemini fallback preset** — `configs/gemini.yaml` for deterministic runs
+  (~$0.25/book, ~20 min).
+
+### Changed
+
+- **Default provider**: codex (was gemini-flash-latest)
+- **Spine caps unclamped**: soft guidance (3-10 per category) replaces hard
+  5/5/8/5 limits. Spines are 2-3× richer.
+- **Retry prompt**: asks for valid JSON instead of shorter output.
+- **Voice instruction**: ghostwriting-grade ("copy the author's register,
+  tics, sentence rhythm") instead of generic "match the voice."
+- **Cost estimator**: only counts metered (Gemini) stages in projection,
+  preventing false $3 ceiling aborts on codex runs.
+- **Codex timeout**: 60 min (was 20 min) to handle dense chapters.
+- **Distill prompts**: stripped `[^pid:uuid]` prefixes and citation output
+  rules for smaller prompts and cleaner output.
+- **Coherence fix-up**: asserts `body_text` is str.
+
+### Performance
+
+| Metric | v0.2.0 | v0.3.0 |
+|--------|--------|--------|
+| Runtime | 21 min | **14 min** |
+| Cost | $0.24 | **$0.001** |
+| Spine success | 10/12 | **12/12** |
+| Output words | 17,637 | **25,512** |
+| Output pages | 64 | **92** |
+
+### Fixed
+
+- Stale `spine_result` reference in parallel spine stage (NameError after
+  all futures completed)
+- `gpt-5.1-codex` model ID not available on ChatGPT accounts — now uses
+  codex default model from `~/.codex/config.toml`
+
+---
+
 ## [0.2.0] — 2026-04-17
 
 Complete rebuild of the distillation pipeline. Replaces the 8-stage v0.1.0
