@@ -129,60 +129,109 @@ graph LR
 
 **Total: ~$1.50–2.00 per book. Runtime: ~15–25 minutes. One API key: `GEMINI_API_KEY`.**
 
-## Quick start
+## Getting started
+
+### 1. Install
 
 ```bash
-# Install
+git clone https://github.com/8lianno/marrow.git
+cd marrow
 uv venv && source .venv/bin/activate
 uv pip install -e .
-
-# Set API key (only one needed — everything runs on Gemini)
-export GEMINI_API_KEY=...
-
-# Distill a book
-marrow book.pdf
+uv pip install google-genai ebooklib
 ```
 
-Output lands in `runs/<book-slug>/05_coherence/`:
+### 2. Set up authentication
 
-```
-book-slug.md          # the distillation (~90 pages, Obsidian markdown)
-book-slug.spine.md    # the structural skeleton (3-5 pages)
-book-slug.source.md   # original text with ^paragraph-id anchors
-manifest.json         # cost, duration, model versions
-coherence_report.json # the audit results
-```
-
-## Example: first successful run
+Marrow uses **Codex CLI** by default (free with ChatGPT subscription) and
+**Gemini Flash Lite** for one cheap classification call.
 
 ```bash
-marrow run "input/No More Mr. Nice Guy! - Robert A. Glover.epub" --force
+# Gemini key (required — used for Stage 2 classify, ~$0.001/book)
+echo "GEMINI_API_KEY=your-key-here" > .env
+
+# Codex CLI (required — used for Stages 3-5, $0 marginal cost)
+codex login
 ```
 
-Results on a 55,000-word / 129-page EPUB:
+If you don't have Codex, use the Gemini-only path instead (costs ~$0.25/book):
 
-| Metric | Result |
-|--------|--------|
-| Output | **78 pages** (21,603 words) |
-| Compression | 39.5% of source |
-| Spine success | 11 of 12 sections |
-| Coherence | PASS (no fix-ups needed) |
-| Cost | **$0.56** |
-| Runtime | **21 minutes** |
-| Tokens | 315K in / 84K out |
-
-Output folder:
-
-```
-runs/no-more-mr-nice-guy-robert-a-glover/05_coherence/
-├── no-more-mr-nice-guy-robert-a-glover.md           # the distillation (78 pages)
-├── no-more-mr-nice-guy-robert-a-glover.spine.md     # structural skeleton
-├── no-more-mr-nice-guy-robert-a-glover.source.md    # original with ^anchors
-├── manifest.json                                     # run metadata
-└── coherence_report.json                             # audit results
+```bash
+marrow run book.epub --config configs/gemini.yaml
 ```
 
-The `.md` file is the one you read. Open it in Obsidian and the `[p:uuid]` citations become clickable links to the `.source.md` file.
+### 3. Drop a book and run
+
+```bash
+mkdir -p input
+cp ~/Downloads/your-book.epub input/
+
+marrow run "input/your-book.epub"
+```
+
+That's it. Marrow will:
+1. Parse the book into chapters (~3 seconds)
+2. Classify each section type (~3 seconds)
+3. Extract a structural spine per chapter (~5-10 min, 3 chapters in parallel)
+4. Distill each chapter to ~30% against its spine (~10-15 min, 3 in parallel)
+5. Run a coherence audit and fix any gaps (~1-2 min)
+6. Export `.md`, `.epub`, and `.spine.md`
+
+### 4. Find your output
+
+```
+runs/<book-slug>/05_coherence/
+├── <slug>.epub           # clean EPUB — open in any reader
+├── <slug>.md             # Obsidian markdown with spine callouts + citations
+├── <slug>.spine.md       # structural skeleton (standalone)
+├── <slug>.source.md      # original text with ^anchor IDs
+├── manifest.json         # cost, duration, word counts
+└── coherence_report.json # audit results
+```
+
+The **`.epub`** is the primary output — clean prose, no citation clutter,
+with the spine shown at the top of each chapter.
+
+The **`.md`** is for Obsidian users — includes collapsible spine callouts
+and `[[wikilink]]` citations back to the source.
+
+### 5. Options
+
+```bash
+# Re-run (wipes previous output)
+marrow run book.epub --force
+
+# Higher compression (40% instead of 30%)
+marrow run book.epub --compression 0.40
+
+# Inspect just the spine (stages 1-3, no distillation)
+marrow run book.epub --spine-only
+
+# Skip coherence audit (faster, ~70% of quality)
+marrow run book.epub --skip-coherence
+
+# Export to Obsidian vault
+marrow run book.epub --vault ~/obsidian
+
+# Use Gemini instead of Codex (faster, ~$0.25/book)
+marrow run book.epub --config configs/gemini.yaml
+
+# Resume after interruption
+marrow run book.epub --resume
+
+# Delete a run
+marrow clean <book-slug>
+```
+
+### Provider comparison
+
+| | Codex (default) | Gemini (`--config configs/gemini.yaml`) |
+|---|---|---|
+| Cost | ~$0.001/book | ~$0.25/book |
+| Runtime | ~20 min (parallel) | ~20 min |
+| Auth | `codex login` | `GEMINI_API_KEY` |
+| Determinism | No (agent sampling) | Yes |
+| Best for | Daily use, batch runs | Reproducibility, speed |
 
 ## CLI
 
@@ -204,12 +253,14 @@ Config resolution: **built-in defaults → `configs/default.yaml` → `--config`
 → env vars (`MARROW_*`) → CLI flags**.
 
 ```bash
-GEMINI_API_KEY=...              # Required (all stages)
+GEMINI_API_KEY=...              # Required (Stage 2 classify)
 MARROW_RUNS_DIR=./runs          # Working directory root
 MARROW_OBSIDIAN_VAULT=/path     # Auto-export to vault
-MARROW_COST_MAX_PER_BOOK=3.00   # Hard ceiling (aborts if exceeded)
+MARROW_COST_MAX_PER_BOOK=3.00   # Hard ceiling (metered stages only)
 MARROW_LOG_LEVEL=INFO           # DEBUG | INFO | WARNING | ERROR
 ```
+
+Codex authentication: runs on your existing ChatGPT subscription via `codex login`.
 
 ## Design decisions
 
