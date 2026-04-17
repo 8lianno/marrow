@@ -17,8 +17,7 @@ RULES:
 1. NO bullet lists, NO headers within the chapter text. Flowing prose only. Unless the source itself is structured as a list (e.g., "seven habits"), in which case mirror the structure.
 2. NO meta-commentary. No "this chapter argues..." or "the author shows...". Just write in the author's voice.
 3. NO filler. No "importantly,", "notably,", "it is worth noting,". Cut throat-clearing.
-4. Inline citations: at the end of each paragraph, append the paragraph_ids from which the content was drawn, in the format [p:id1, p:id2]. These become clickable anchors in Obsidian.
-5. TARGET LENGTH: {{ target_words }} words (±15%). This is not optional. Write tight.
+4. TARGET LENGTH: {{ target_words }} words (±15%). This is not optional. Write tight.
 
 CHAPTER TITLE: {{ chapter_title }}
 TARGET LENGTH: {{ target_words }} words
@@ -53,7 +52,7 @@ SPINE:
 
 FULL SOURCE:
 {% for p in paragraphs %}
-[^pid:{{ p.paragraph_id }}] {{ p.text }}
+{{ p.text }}
 
 {% endfor %}
 

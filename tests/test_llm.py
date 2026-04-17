@@ -67,3 +67,39 @@ def test_archive_call_writes_to_disk(tmp_path: Path) -> None:
 
     log_files = list((tmp_path / "logs" / "llm").glob("test_archive_*.json"))
     assert len(log_files) == 1
+
+
+def test_codex_cmd_includes_reasoning_effort() -> None:
+    """Verify the codex subprocess command includes medium reasoning effort."""
+    # The cmd is built inside _codex_call; verify by checking the source
+    import inspect
+    from marrow.llm import LLMCaller
+
+    source = inspect.getsource(LLMCaller._codex_call)
+    assert 'model_reasoning_effort' in source
+    assert '"medium"' in source
+
+
+def test_distill_prompt_has_no_pid_prefixes() -> None:
+    """Verify distill prompt renders paragraphs without [^pid:uuid] prefixes."""
+    from uuid import uuid4
+
+    from marrow.prompts import render
+    from marrow.schemas.document import ParagraphNode
+    from marrow.schemas.spine import ChapterSpine
+
+    pid = uuid4()
+    p = ParagraphNode(paragraph_id=pid, text="Test paragraph.", page_start=1, page_end=1)
+    spine = ChapterSpine(chapter_title="Ch1", thesis="Test", source_word_count=100, target_word_count=30)
+
+    prompt = render(
+        "distill_chapter.j2",
+        chapter_title="Ch1",
+        spine=spine,
+        paragraphs=[p],
+        target_words=30,
+        compression_pct=30,
+    )
+    assert "[^pid:" not in prompt
+    assert "[p:id1" not in prompt
+    assert "Test paragraph." in prompt

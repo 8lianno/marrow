@@ -268,6 +268,7 @@ class LLMCaller:
             "--skip-git-repo-check",
             "--sandbox", "read-only",
             "--ephemeral",
+            "-c", 'model_reasoning_effort="medium"',
         ])
         if schema_path is not None:
             cmd.extend(["--output-schema", schema_path])
