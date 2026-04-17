@@ -247,6 +247,29 @@ def _strip_citations(text: str) -> str:
     return re.sub(r"\s*\[p:[a-f0-9-]+(?:,\s*p:[a-f0-9-]+)*\]", "", text)
 
 
+def _smart_title(cd_title: str, chapter_spine, index: int) -> str:
+    """Generate a readable title from spine when the auto-splitter produced generic names."""
+    if not chapter_spine:
+        return cd_title
+    if not re.match(r"^(Introduction|Body|Front Matter|Part \d+)\s*(\(Part \d+\))?$", cd_title):
+        return cd_title
+
+    # Skip front matter — keep as-is
+    if cd_title == "Front Matter":
+        return cd_title
+
+    # Pick the best short title: first framework name > first key term > thesis snippet
+    if chapter_spine.frameworks:
+        name = chapter_spine.frameworks[0].name.title()
+        if len(name) > 50:
+            name = name[:47] + "..."
+        return f"Chapter {index}: {name}"
+    if chapter_spine.key_terms:
+        return f"Chapter {index}: {chapter_spine.key_terms[0].term.title()}"
+    words = chapter_spine.thesis.split()[:5]
+    return f"Chapter {index}: {' '.join(words).title()}..."
+
+
 def _render_distillation_md(
     distillation: Distillation,
     spine: Spine,
@@ -269,12 +292,14 @@ def _render_distillation_md(
     lines.append("---")
     lines.append("")
 
-    for cd in distillation.chapters:
-        lines.append(f"## {cd.chapter_title}")
+    for i, cd in enumerate(distillation.chapters, 1):
+        chapter_spine = spine_map.get(str(cd.section_id))
+
+        chapter_title = _smart_title(cd.chapter_title, chapter_spine, i)
+
+        lines.append(f"## {chapter_title}")
         lines.append("")
 
-        # Collapsible spine callout
-        chapter_spine = spine_map.get(str(cd.section_id))
         if chapter_spine:
             lines.append("> [!abstract]- Spine")
             lines.append(f"> **Thesis:** {chapter_spine.thesis}")
@@ -333,21 +358,75 @@ def _render_epub(
         file_name="style/default.css",
         media_type="text/css",
         content=b"""
-body { font-family: Georgia, 'Times New Roman', serif; line-height: 1.6; margin: 2em; color: #222; }
-h1 { font-size: 1.8em; margin-bottom: 0.3em; }
-h2 { font-size: 1.4em; margin-top: 2em; margin-bottom: 0.5em; border-bottom: 1px solid #ccc; padding-bottom: 0.3em; }
-h3 { font-size: 1.1em; margin-top: 1.5em; }
-p { margin-bottom: 0.8em; text-align: justify; }
-.meta { color: #666; font-style: italic; font-size: 0.9em; margin-bottom: 2em; }
-.spine-item { margin-bottom: 0.3em; }
-.spine-label { font-weight: bold; }
-blockquote { border-left: 3px solid #ccc; padding-left: 1em; color: #555; margin: 1em 0; }
+body {
+  font-family: Georgia, 'Times New Roman', serif;
+  line-height: 1.7;
+  margin: 1.5em 2em;
+  color: #1a1a1a;
+  font-size: 1em;
+}
+h1 {
+  font-size: 1.8em;
+  margin-bottom: 0.5em;
+  letter-spacing: -0.02em;
+}
+h2 {
+  font-size: 1.5em;
+  margin-top: 2.5em;
+  margin-bottom: 0.6em;
+  border-bottom: 2px solid #333;
+  padding-bottom: 0.4em;
+  letter-spacing: -0.01em;
+}
+h3 {
+  font-size: 1.15em;
+  margin-top: 1.8em;
+  margin-bottom: 0.4em;
+  color: #333;
+  font-style: italic;
+}
+p {
+  margin-bottom: 0.9em;
+  text-align: justify;
+  text-indent: 0;
+}
+.meta {
+  color: #666;
+  font-style: italic;
+  font-size: 0.9em;
+  margin-bottom: 2em;
+  text-align: center;
+}
+.chapter-subtitle {
+  font-size: 0.85em;
+  color: #555;
+  font-style: italic;
+  margin-top: -0.3em;
+  margin-bottom: 1.5em;
+}
+blockquote {
+  border-left: 3px solid #999;
+  padding-left: 1em;
+  color: #444;
+  margin: 1.2em 0;
+  font-style: italic;
+}
 ol { padding-left: 1.5em; }
-li { margin-bottom: 0.3em; }
-hr { border: none; border-top: 1px solid #ddd; margin: 2em 0; }
-.spine-callout { background: #f5f5f0; border-left: 4px solid #888; padding: 0.5em 1em; margin: 0 0 1.5em 0; font-size: 0.9em; color: #444; }
-.spine-callout p { margin: 0.4em 0; }
-.spine-callout ol { margin: 0.3em 0 0.3em 1.5em; }
+li { margin-bottom: 0.4em; }
+hr { border: none; border-top: 1px solid #ccc; margin: 2.5em 0; }
+.spine-callout {
+  background: #f8f7f4;
+  border-left: 3px solid #666;
+  padding: 0.8em 1.2em;
+  margin: 0 0 2em 0;
+  font-size: 0.85em;
+  color: #555;
+  line-height: 1.5;
+}
+.spine-callout p { margin: 0.3em 0; }
+.spine-callout ol { margin: 0.3em 0 0.3em 1.2em; font-size: 0.95em; }
+.spine-callout li { margin-bottom: 0.2em; }
+.spine-label { font-weight: bold; color: #333; }
 """,
     )
     book.add_item(css)
@@ -395,32 +474,35 @@ Generated {datetime.now(UTC).strftime('%Y-%m-%d')}.</p>
                 para = re.sub(r"\*(.+?)\*", r"<em>\1</em>", para)
                 body_html += f"<p>{para}</p>\n"
 
-        # Per-chapter spine callout
+        # Per-chapter spine callout + smart title
         chapter_spine = spine_map.get(str(cd.section_id))
+
+        chapter_title = _smart_title(cd.chapter_title, chapter_spine, i)
+        subtitle = chapter_spine.thesis if chapter_spine and chapter_title != cd.chapter_title else ""
+
         spine_block = ""
         if chapter_spine:
             spine_block = '<div class="spine-callout">\n'
-            spine_block += f'<p><strong>Thesis:</strong> {chapter_spine.thesis}</p>\n'
+            spine_block += f'<p><span class="spine-label">Thesis:</span> {chapter_spine.thesis}</p>\n'
             if chapter_spine.frameworks:
                 names = ", ".join(f.name for f in chapter_spine.frameworks)
-                spine_block += f'<p><strong>Frameworks:</strong> {names}</p>\n'
+                spine_block += f'<p><span class="spine-label">Frameworks:</span> {names}</p>\n'
             if chapter_spine.key_examples:
                 labels = ", ".join(e.label for e in chapter_spine.key_examples)
-                spine_block += f'<p><strong>Key examples:</strong> {labels}</p>\n'
-            if chapter_spine.argumentative_moves:
-                spine_block += '<p><strong>Argument flow:</strong></p>\n<ol>\n'
-                for move in chapter_spine.argumentative_moves:
-                    spine_block += f'<li>{move}</li>\n'
-                spine_block += '</ol>\n'
+                spine_block += f'<p><span class="spine-label">Key examples:</span> {labels}</p>\n'
             spine_block += '</div>\n'
 
-        chapter_title = cd.chapter_title
+        subtitle_html = f'<p class="chapter-subtitle">{subtitle}</p>\n' if subtitle else ""
+
         ch = epub.EpubHtml(
             title=chapter_title,
             file_name=f"chapter_{i:02d}.xhtml",
             lang="en",
         )
-        ch.content = f"<html><body><h2>{chapter_title}</h2>\n{spine_block}{body_html}</body></html>".encode("utf-8")
+        ch.content = (
+            f"<html><body><h2>{chapter_title}</h2>\n"
+            f"{subtitle_html}{spine_block}{body_html}</body></html>"
+        ).encode("utf-8")
         ch.add_item(css)
         book.add_item(ch)
         epub_chapters.append(ch)
