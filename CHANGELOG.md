@@ -5,6 +5,90 @@ All notable changes to Marrow will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] — 2026-04-17
+
+Complete rebuild of the distillation pipeline. Replaces the 8-stage v0.1.0
+architecture with a 5-stage spine architecture that separates selection from
+generation.
+
+### Added
+
+- **Spine architecture** — new two-phase approach: extract a structural
+  skeleton (spine) per chapter, then distill against it. The spine is a
+  first-class inspectable artifact listing frameworks, key examples,
+  argumentative moves, key terms, and a voice sample.
+- **Stage 02: Classify** — single Gemini Flash call classifies top-level
+  sections as intro / body / conclusion / appendix / foreword / other.
+  Each type gets a different compression ratio (intro 12%, body 30%,
+  appendix 70%).
+- **Stage 03: Spine** — Gemini 2.5 Flash with thinking mode extracts the
+  structural skeleton per chapter. Thinking mode enables extended
+  reasoning before answering, producing better selection decisions.
+- **Stage 04: Distill** — Gemini 2.5 Pro compresses each chapter against
+  its spine at the configured compression ratio. Continuation loop with
+  `finish_reason` detection handles chapters that exceed the output
+  window. Overlap-aware merge prevents duplication at boundaries.
+- **Stage 05: Coherence** — four-phase final stage:
+  (A) deterministic fuzzy-match of spine items against distillation text,
+  (B) Claude Sonnet 4.6 audit for voice drift / broken threads / redundancy,
+  (C) targeted Pro fix-ups for flagged chapters,
+  (D) Obsidian markdown output assembly with wikilink citations.
+- **Thinking mode support** in `LLMCaller` — Gemini calls can enable
+  `ThinkingConfig` via `thinking: true` in `ModelRoute`. Thinking parts
+  are stripped from the response; only the final answer is returned.
+- **`LLMResponse` class** — `call_raw()` returns structured response with
+  `finish_reason` field, enabling the continuation loop.
+- **Code fence stripping** in `_validate()` — handles models that wrap
+  JSON output in markdown code fences.
+- **New schemas**: `ChapterSpine`, `Framework`, `Example`, `KeyTerm`,
+  `Spine`, `ChapterDistillation`, `Distillation`, `CoherenceReport`,
+  `MissingSpineItem`, `VoiceDrift`, `BrokenThread`, `Redundancy`,
+  `SectionClassification`, `BookClassification`.
+- **6 prompt templates**: `classify_sections.j2`, `spine_extract.j2`,
+  `distill_chapter.j2`, `distill_continue.j2`, `coherence_audit.j2`,
+  `coherence_fix.j2`.
+
+### Changed
+
+- **Default models**: Gemini 2.5 Flash (thinking) for spine, Gemini 2.5
+  Pro for distillation, Claude Sonnet 4.6 for coherence. No local models.
+- **Config shape**: stripped `ChunkConfig`, `GraphConfig`, `ClaimsConfig`,
+  `SynthesizeConfig`, `ValidateConfig`, `EvaluateConfig`, `HostConfig`,
+  `MonitorConfig`. Added `ClassifyConfig`, `SpineConfig`, `DistillConfig`,
+  `CoherenceConfig`. `ModelRoute` gains `thinking` and `thinking_budget`
+  fields. Provider restricted to `anthropic | gemini | stub`.
+- **Cost ceiling**: default reduced from $4.00 to $3.00 per book.
+- **CLI**: simplified to `marrow <book.pdf>`, `clean`, `version`. Added
+  `--compression`, `--spine-only`, `--skip-coherence`, `--vault` flags.
+- **Output format**: single output directory at `05_coherence/` with
+  `<slug>.md`, `<slug>.spine.md`, `<slug>.source.md`, `manifest.json`.
+- **`pyproject.toml`**: version 2.0.0. Added `google-genai`, `jinja2`.
+  Removed `reportlab`.
+
+### Removed
+
+- **7 stages**: `02_chunk`, `03_graph`, `04_claims`, `05_synthesize`,
+  `05b_validate`, `06a_evaluate`, `06b_export`.
+- **Host Mode**: `host.py`, `HostTask`, `HostResult`, `HostTaskClaim`,
+  file-based task polling, `marrow next`, `marrow submit`, `marrow tasks`.
+- **Watch daemon**: `watch.py`, `marrow watch`, `MonitorConfig`.
+- **Progress reporting**: `progress.py`, `RichProgressReporter`,
+  `PlainProgressReporter`.
+- **Local model providers**: ollama, vLLM, openrouter call paths.
+- **Evaluation harness**: HAMLET, BooookScore, FActScore.
+- **Quiz validation**: SummQ adversarial loop.
+- **Embeddings / vector store**: Jina v2 embedder, LanceDB, late-chunking.
+- **Graph infrastructure**: NetworkX, Louvain, community summaries.
+- **Config presets**: `ollama.yaml`, `openrouter.yaml`, `cheap.yaml`,
+  `express.yaml`, `express_stub.yaml`, `anthropic.yaml`, `gemini.yaml`.
+- **Schemas**: `ChunkRecord`, `EntityRecord`, `RelationshipRecord`,
+  `CommunityRecord`, `AtomicClaim`, `BriefDraft`, `BriefSection`,
+  `QuizQuestion`, `EvaluationReport`, and related models.
+- **9 prompt templates**: all v0.1.0 Jinja2 templates.
+- **~8,500 lines of code** net removed.
+
+---
+
 ## [0.1.0] — 2026-04-15
 
 First public release: the full eight-stage pipeline runs end-to-end, both
