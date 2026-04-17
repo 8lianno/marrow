@@ -161,15 +161,6 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
         total_source += wc
         total_target += tgt
 
-        log.info(
-            "chapter_spine_extracted",
-            chapter=section.title,
-            frameworks=len(spine_result.frameworks),
-            examples=len(spine_result.key_examples),
-            moves=len(spine_result.argumentative_moves),
-            terms=len(spine_result.key_terms),
-        )
-
     full_spine = Spine(
         book_slug=doc.book_slug,
         book_title=doc.book_title,
