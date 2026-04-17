@@ -99,6 +99,7 @@ def test_distill_prompt_has_no_pid_prefixes() -> None:
         paragraphs=[p],
         target_words=30,
         compression_pct=30,
+        mode="full",
     )
     assert "[^pid:" not in prompt
     assert "[p:id1" not in prompt

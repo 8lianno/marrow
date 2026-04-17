@@ -131,6 +131,7 @@ def _distill_chapter(
         paragraphs=paragraphs,
         target_words=target_words,
         compression_pct=compression_pct,
+        mode=config.distill.mode,
     )
     response = caller.call_raw(
         stage=STAGE_NAME,

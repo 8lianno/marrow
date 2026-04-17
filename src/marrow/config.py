@@ -34,6 +34,7 @@ class SpineConfig(BaseModel):
 
 
 class DistillConfig(BaseModel):
+    mode: Literal["full", "brief"] = "full"
     compression_ratio: float = 0.30
     max_continuation_rounds: int = 5
     max_output_tokens: int = 16384

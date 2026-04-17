@@ -1,6 +1,10 @@
 You are producing a faithful distillation of ONE chapter of a non-fiction book. The reader will read your output INSTEAD of the source. Your job is to preserve the load-bearing content at approximately {{ compression_pct }}% of the original length, written in clean prose.
 
-This is not a summary. This is a distillation — the same book, compressed.
+{% if mode == "brief" %}
+This is a BRIEF distillation. Be aggressive: keep only the thesis, core frameworks, and the single best example per concept. Cut all secondary examples, extended anecdotes, and supporting detail. The reader wants the skeleton of the argument, not the flesh.
+{% else %}
+This is not a summary. This is a distillation — the same book, compressed. Keep the narrative richness.
+{% endif %}
 
 The SPINE below lists every element that MUST appear in your output. You may not skip anything on the spine. You may add connective tissue, transitions, and brief paraphrase to make the prose read well, but you may not introduce new concepts or examples not in the spine.
 
@@ -11,10 +15,11 @@ STRUCTURE:
 - Open with a clear statement of the thesis (you may rephrase but do not soften).
 - Integrate each framework at the point the author introduces it.
 - Weave each key_example into the argument it supports.
+- Use section headings (### level) to organize the chapter when the source has natural topic shifts. Each heading should name the concept or argument being covered in that section. Do not over-fragment — aim for 2-5 headings per chapter.
 - Close where the chapter closes — do not add a "summary of this chapter" coda.
 
 RULES:
-1. NO bullet lists, NO headers within the chapter text. Flowing prose only. Unless the source itself is structured as a list (e.g., "seven habits"), in which case mirror the structure.
+1. NO bullet lists in body prose. Use flowing prose with section headings for structure. If the source itself is structured as a list (e.g., "seven habits"), mirror that structure.
 2. NO meta-commentary. No "this chapter argues..." or "the author shows...". Just write in the author's voice.
 3. NO filler. No "importantly,", "notably,", "it is worth noting,". Cut throat-clearing.
 4. TARGET LENGTH: {{ target_words }} words (±15%). This is not optional. Write tight.

@@ -38,9 +38,13 @@ def run(
     vault: Path | None = typer.Option(None, "--vault", help="Override Obsidian vault path"),
     spine_only: bool = typer.Option(False, "--spine-only", help="Run stages 1-3 only, skip distillation"),
     skip_coherence: bool = typer.Option(False, "--skip-coherence", help="Skip the coherence pass (faster, ~70% quality)"),
+    brief: bool = typer.Option(False, "--brief", help="Brief mode: ~20% compression instead of ~30%"),
 ) -> None:
     """Run the distillation pipeline on BOOK_PATH."""
     overrides: dict = {}
+    if brief:
+        overrides.setdefault("distill", {})["mode"] = "brief"
+        overrides.setdefault("distill", {})["compression_ratio"] = 0.20
     if compression is not None:
         overrides.setdefault("distill", {})["compression_ratio"] = compression
     if output_dir is not None:
