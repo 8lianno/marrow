@@ -8,6 +8,14 @@ from marrow.config import load_config
 from marrow.llm import LLMCaller
 
 
+def test_codex_provider_is_registered_in_config() -> None:
+    """Sanity: codex is a valid provider value in ModelRoute."""
+    from marrow.config import ModelRoute
+
+    route = ModelRoute(provider="codex", model_id="gpt-5.1-codex")
+    assert route.provider == "codex"
+
+
 def test_stub_provider_records_to_ledger(tmp_path: Path) -> None:
     cfg = load_config(
         overrides={

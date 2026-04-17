@@ -1,6 +1,6 @@
 # Marrow v0.2 default configuration.
 # CLI flags > env vars (MARROW_*) > this file > built-in defaults.
-# All stages use Gemini Flash. Only GEMINI_API_KEY is required.
+# Default: codex for heavy stages, gemini for classify.
 
 ingest:
   parser: docling
@@ -22,25 +22,26 @@ cost:
   max_per_book: 3.00
 
 models:
+  # Classify stays on Gemini Flash Lite: one call per book, ~$0.001, and
+  # routing it through codex would add 60s overhead for no meaningful saving.
   classify:
     provider: gemini
     model_id: gemini-flash-lite-latest
     api_key_env: GEMINI_API_KEY
 
+  # Spine, distill, and coherence go through Codex CLI (subscription-billed,
+  # zero marginal cost). Slower but free if you already pay for ChatGPT.
   spine:
-    provider: gemini
-    model_id: gemini-flash-latest
-    api_key_env: GEMINI_API_KEY
+    provider: codex
+    model_id: gpt-5.1-codex
 
   distill:
-    provider: gemini
-    model_id: gemini-flash-latest
-    api_key_env: GEMINI_API_KEY
+    provider: codex
+    model_id: gpt-5.1-codex
 
   coherence:
-    provider: gemini
-    model_id: gemini-flash-latest
-    api_key_env: GEMINI_API_KEY
+    provider: codex
+    model_id: gpt-5.1-codex
 
 logging:
   level: INFO

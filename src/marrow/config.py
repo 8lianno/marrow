@@ -53,7 +53,7 @@ class CostConfig(BaseModel):
 
 
 class ModelRoute(BaseModel):
-    provider: Literal["gemini", "stub"] = "stub"
+    provider: Literal["gemini", "codex", "stub"] = "stub"
     model_id: str = "stub"
     api_key_env: str | None = None
     thinking: bool = False  # enable Gemini thinking mode
@@ -70,23 +70,20 @@ class ModelsConfig(BaseModel):
     )
     spine: ModelRoute = Field(
         default_factory=lambda: ModelRoute(
-            provider="gemini",
-            model_id="gemini-flash-latest",
-            api_key_env="GEMINI_API_KEY",
+            provider="codex",
+            model_id="gpt-5.1-codex",
         )
     )
     distill: ModelRoute = Field(
         default_factory=lambda: ModelRoute(
-            provider="gemini",
-            model_id="gemini-flash-latest",
-            api_key_env="GEMINI_API_KEY",
+            provider="codex",
+            model_id="gpt-5.1-codex",
         )
     )
     coherence: ModelRoute = Field(
         default_factory=lambda: ModelRoute(
-            provider="gemini",
-            model_id="gemini-flash-latest",
-            api_key_env="GEMINI_API_KEY",
+            provider="codex",
+            model_id="gpt-5.1-codex",
         )
     )
 

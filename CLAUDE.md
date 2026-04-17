@@ -37,22 +37,19 @@ book.pdf
   → 5. Coherence (deterministic + Pro-thinking audit + Pro fix-ups) → final output
 ```
 
-### Model Roles (all Gemini — single API key)
-| Role | Model | Why |
-|------|-------|-----|
-| Classify | Gemini 2.5 Flash (thinking) | Cheap section-type detection. |
-| Spine extraction | Gemini 2.5 Flash (thinking) | Needs reasoning to decide what's load-bearing. Cheap. |
-| Distillation | Gemini 2.5 Pro | Needs high-quality prose at 30% compression. |
-| Coherence audit | Gemini 2.5 Pro (thinking) | Whole-book reasoning with deep thinking. |
-| Fix-ups | Gemini 2.5 Pro (reuses distill route) | Targeted chapter rewrites. |
+### Model Roles (provider mix — default: codex + gemini)
+| Role | Provider | Model | Why |
+|------|----------|-------|-----|
+| Classify | Gemini | `gemini-flash-lite-latest` | One cheap call; not worth routing to codex |
+| Spine | Codex CLI | `gpt-5.1-codex` | 10-17 calls/book; subscription-free |
+| Distill | Codex CLI | `gpt-5.1-codex` | 10-15 calls/book; the cost hog, now free |
+| Coherence | Codex CLI | `gpt-5.1-codex` | One whole-book call; free |
 
 ### Key Design Decisions
-- **Gemini-only**: All stages use Gemini models. One API key, one provider, no vendor split.
+- **Codex default, Gemini fallback**: Heavy stages use Codex CLI (subscription, $0 marginal). Use `--config configs/gemini.yaml` for speed/determinism.
 - **Spine/distill split**: Selection (spine) is separate from generation (distill). The spine is a first-class artifact.
 - **Length by construction**: `target_words = source_words * compression_ratio`. No prompted hopes.
 - **Deterministic verification**: Spine items fuzzy-matched against distillation text. Not an LLM vibes check.
-- **Thinking mode**: Spine extraction (Flash) and coherence audit (Pro) use Gemini thinking for structured reasoning.
-- **No local models**: API models only. Quality over cost. ~$1-3/book.
 
 ## Key Directories
 
@@ -141,27 +138,29 @@ Every artifact crossing a stage boundary is a Pydantic v2 model serialized to JS
 ## Environment Variables
 
 ```bash
-GEMINI_API_KEY=...              # Required (all stages)
-MARROW_RUNS_DIR=./runs          # Working directory root
-MARROW_LOG_LEVEL=INFO           # DEBUG | INFO | WARNING | ERROR
-MARROW_OBSIDIAN_VAULT=/path     # If set, exports go here
-MARROW_COST_MAX_PER_BOOK=3.00   # Hard ceiling per book
+GEMINI_API_KEY=...              # Required (Stage 2 classify)
+MARROW_RUNS_DIR=./runs
+MARROW_LOG_LEVEL=INFO
+MARROW_OBSIDIAN_VAULT=/path
+MARROW_COST_MAX_PER_BOOK=3.00
 ```
+
+Codex authentication: uses your existing `codex` CLI auth (ChatGPT login or API key). Run `codex login` once if needed.
 
 ## Testing
 
 ```bash
 pytest tests/ -v -k "not slow"   # fast unit tests
-pytest tests/ -v                  # all tests including Docling
+pytest tests/ -v                  # all tests including Docling + Codex
 ```
 
-## Cost Targets
-- Classify (Flash): ~$0.02/book
-- Spine extraction (Flash-thinking): ~$0.10/book
-- Distillation (Pro): ~$1.00/book
-- Coherence (Pro-thinking): ~$0.40/book
-- Fix-ups (Pro): ~$0.20/book
-- **Total: ~$1.50-2.00/book**
+## Cost Targets (default: codex + gemini mix)
+- Classify (Gemini Flash Lite): ~$0.001/book
+- Spine + Distill + Coherence (Codex CLI): $0 marginal (subscription)
+- **Total: ~$0.001/book on subscription. Runtime: 50-75 min.**
+
+Fallback to full-Gemini (`--config configs/gemini.yaml`):
+- **Total: ~$0.25/book. Runtime: 20-25 min.**
 
 ---
 **Last updated:** 2026-04-17

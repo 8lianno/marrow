@@ -1,0 +1,26 @@
+# Full-Gemini path. Use for: books where you want determinism (reproducible
+# UUIDs across runs), or when runtime matters more than cost.
+# Usage: marrow book.epub --config configs/gemini.yaml
+
+extends: default.yaml
+
+models:
+  classify:
+    provider: gemini
+    model_id: gemini-flash-lite-latest
+    api_key_env: GEMINI_API_KEY
+
+  spine:
+    provider: gemini
+    model_id: gemini-flash-latest
+    api_key_env: GEMINI_API_KEY
+
+  distill:
+    provider: gemini
+    model_id: gemini-flash-latest
+    api_key_env: GEMINI_API_KEY
+
+  coherence:
+    provider: gemini
+    model_id: gemini-flash-latest
+    api_key_env: GEMINI_API_KEY

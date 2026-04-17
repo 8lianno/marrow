@@ -24,11 +24,11 @@ from marrow.store.ledger import CostLedger
 T = TypeVar("T", bound=BaseModel)
 log = get_logger(__name__)
 
-# Per-1k-token pricing (approximate, 2026-04).
 # Per-1k-token pricing (April 2026).
 _PRICING_USD_PER_1K: dict[tuple[str, str], tuple[float, float]] = {
     ("gemini", "gemini-flash-latest"): (0.0006, 0.0006),
     ("gemini", "gemini-flash-lite-latest"): (0.0003, 0.0003),
+    ("codex", "*"): (0.0, 0.0),  # subscription, no per-call billing
     ("stub", "*"): (0.0, 0.0),
 }
 
@@ -113,6 +113,8 @@ class LLMCaller:
                 model_id, prompt, response_schema, route.api_key_env, max_tokens,
                 thinking=route.thinking, thinking_budget=route.thinking_budget,
             )
+        elif provider == "codex":
+            raw = self._codex_call(model_id, prompt, response_schema, max_tokens)
         else:
             raise LLMError(f"Unknown provider: {provider}")
 
@@ -227,6 +229,99 @@ class LLMCaller:
                 finish_reason = "MAX_TOKENS"
 
         return LLMResponse(text, tokens_in, tokens_out, finish_reason)
+
+    def _codex_call(
+        self,
+        model_id: str,
+        prompt: str,
+        response_schema: type[T] | None,
+        max_tokens: int,  # ignored — codex runs until done
+    ) -> LLMResponse:
+        """Invoke `codex exec` as a subprocess.
+
+        Uses the user's ChatGPT/Codex subscription authentication (no API key
+        required). Prompt is piped via stdin to avoid arg-length limits on
+        large Stage 4 distill prompts.
+        """
+        import json as _json
+        import os as _os
+        import shutil as _shutil
+        import subprocess
+        import tempfile
+
+        if _shutil.which("codex") is None:
+            raise LLMError(
+                "codex CLI not found on PATH. Install from "
+                "https://codex.openai.com/install.sh or run "
+                "`marrow --help` with provider=gemini."
+            )
+
+        schema_path: str | None = None
+        if response_schema is not None:
+            schema_dict = response_schema.model_json_schema()
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", delete=False, encoding="utf-8"
+            ) as sf:
+                _json.dump(schema_dict, sf)
+                schema_path = sf.name
+
+        cmd: list[str] = ["codex", "exec"]
+        if model_id and model_id not in ("codex", "default", "auto", ""):
+            cmd.extend(["-m", model_id])
+        cmd.extend([
+            "--skip-git-repo-check",
+            "--sandbox", "read-only",
+            "--ephemeral",
+        ])
+        if schema_path is not None:
+            cmd.extend(["--output-schema", schema_path])
+        cmd.append("-")  # read prompt from stdin
+
+        try:
+            result = subprocess.run(
+                cmd,
+                input=prompt,
+                capture_output=True,
+                text=True,
+                timeout=1200,  # 20-minute ceiling per call
+                encoding="utf-8",
+            )
+        except subprocess.TimeoutExpired as e:
+            raise LLMError(
+                f"codex exec timed out after 20 minutes. "
+                f"Prompt length: {len(prompt)} chars."
+            ) from e
+        finally:
+            if schema_path is not None:
+                try:
+                    _os.unlink(schema_path)
+                except OSError:
+                    pass
+
+        stderr_tail = (result.stderr or "")[-2000:]
+        stdout_text = (result.stdout or "").strip()
+
+        if result.returncode != 0:
+            lowered = stderr_tail.lower()
+            if any(k in lowered for k in ("rate limit", "quota", "usage limit", "too many requests")):
+                from marrow.errors import BudgetExceeded
+
+                raise BudgetExceeded(
+                    f"Codex subscription quota exhausted. "
+                    f"Wait or switch to provider=gemini. stderr:\n{stderr_tail}"
+                )
+            raise LLMError(
+                f"codex exec failed (exit {result.returncode}):\n{stderr_tail}"
+            )
+
+        if not stdout_text:
+            raise LLMError(
+                f"codex exec produced empty output. stderr:\n{stderr_tail}"
+            )
+
+        tokens_in = _approx_tokens(prompt)
+        tokens_out = _approx_tokens(stdout_text)
+        return LLMResponse(stdout_text, tokens_in, tokens_out, "STOP")
 
     @staticmethod
     def _stub_response(prompt: str, response_schema: type[T] | None) -> str:
