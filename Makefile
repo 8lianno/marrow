@@ -1,4 +1,4 @@
-.PHONY: install test lint typecheck format all clean smoke
+.PHONY: install test lint typecheck format all clean
 
 install:
 	uv venv
@@ -19,10 +19,6 @@ typecheck:
 	mypy src/marrow
 
 all: lint typecheck test
-
-smoke:
-	marrow run tests/fixtures/books/synthetic.pdf --mode api --force
-	marrow run tests/fixtures/books/synthetic.pdf --mode host --force
 
 clean:
 	rm -rf .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov build dist *.egg-info

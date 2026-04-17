@@ -7,7 +7,7 @@ pre-1.0; older tags are not patched.
 
 | Version | Supported |
 |---|---|
-| 0.1.x (latest on `main`) | ✅ |
+| 0.2.x (latest on `main`) | ✅ |
 | Earlier | ❌ |
 
 ## Reporting a vulnerability

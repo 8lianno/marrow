@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from marrow.ids import chunk_uuid, paragraph_id, section_id
+from marrow.ids import paragraph_id, section_id
 
 
 def test_paragraph_id_deterministic() -> None:
@@ -14,12 +14,6 @@ def test_paragraph_id_deterministic() -> None:
 def test_paragraph_id_changes_with_text() -> None:
     a = paragraph_id("Hello world.", ["Chapter 1"], 1)
     b = paragraph_id("Hello mars.", ["Chapter 1"], 1)
-    assert a != b
-
-
-def test_chunk_uuid_includes_book_slug() -> None:
-    a = chunk_uuid("Same text.", "book-one", ["Ch 1"])
-    b = chunk_uuid("Same text.", "book-two", ["Ch 1"])
     assert a != b
 
 
