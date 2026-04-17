@@ -127,6 +127,7 @@ def run_pipeline(
     book_path: Path,
     config: MarrowConfig,
     *,
+    resume: bool = False,
     force: bool = False,
     only_stage: str | None = None,
 ) -> RunManifest:
@@ -151,6 +152,13 @@ def run_pipeline(
 
     for stage in stages:
         if only_stage and only_stage not in (stage.name, stage.key, stage.dirname):
+            continue
+
+        if resume and is_complete(working_dir, stage):
+            log.info("stage_skipped_already_complete", stage=stage.dirname)
+            existing = working_dir / stage.dirname / "result.json"
+            if existing.exists():
+                stage_results.append(read_json(existing, StageResult))
             continue
 
         log.info("stage_starting", stage=stage.dirname)

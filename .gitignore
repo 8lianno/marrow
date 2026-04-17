@@ -24,6 +24,9 @@ coverage.xml
 
 runs/
 
+# Book files (large binaries, don't commit)
+tests/fixtures/books/*.epub
+
 .DS_Store
 .idea/
 .vscode/

@@ -47,3 +47,8 @@ def test_cli_overrides_beat_env(monkeypatch) -> None:
 def test_compression_override() -> None:
     cfg = load_config(overrides={"distill": {"compression_ratio": 0.50}})
     assert cfg.distill.compression_ratio == 0.50
+
+
+def test_max_output_tokens_default() -> None:
+    cfg = load_config()
+    assert cfg.distill.max_output_tokens == 16384

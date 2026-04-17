@@ -136,6 +136,7 @@ def _distill_chapter(
         stage=STAGE_NAME,
         prompt=prompt,
         model_role="distill",
+        max_tokens=config.distill.max_output_tokens,
     )
 
     accumulated = response.text
@@ -170,6 +171,7 @@ def _distill_chapter(
             current_word_count=current_wc,
             remaining_words=remaining_words,
             remaining_items=remaining_items if remaining_items else ["(all spine items covered — just finish the prose)"],
+            voice_sample=spine.voice_sample or "(no voice sample available)",
         )
         response = caller.call_raw(
             stage=STAGE_NAME,

@@ -30,6 +30,7 @@ console = Console()
 def run(
     book_path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
     config: Path | None = typer.Option(None, "--config", help="Path to YAML config"),
+    resume: bool = typer.Option(False, "--resume", help="Resume from last completed stage"),
     force: bool = typer.Option(False, "--force", help="Wipe working directory and restart"),
     only_stage: str | None = typer.Option(None, "--stage", help="Run a single stage by name/key"),
     compression: float | None = typer.Option(None, "--compression", help="Override compression ratio (default 0.30)"),
@@ -60,6 +61,7 @@ def run(
         manifest = run_pipeline(
             book_path,
             cfg,
+            resume=resume,
             force=force,
             only_stage=effective_only_stage,
         )

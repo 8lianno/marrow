@@ -13,7 +13,7 @@ from time import perf_counter
 from uuid import UUID
 
 from marrow.config import MarrowConfig
-from marrow.io import read_json, write_json
+from marrow.io import read_json, write_json, write_text
 from marrow.llm import LLMCaller
 from marrow.logging import get_logger
 from marrow.prompts import render
@@ -58,6 +58,9 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
     total_source = 0
     total_target = 0
 
+    out_dir = working_dir / STAGE_NAME
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     for idx, section in enumerate(doc.toc, 1):
         paragraphs = _flatten_paragraphs(section)
         word_count = sum(len(p.text.split()) for p in paragraphs)
@@ -85,29 +88,42 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
             compression_pct=int(compression * 100),
         )
 
-        spine = caller.call(
-            stage=STAGE_NAME,
-            prompt=prompt,
-            model_role="spine",
-            response_schema=ChapterSpine,
-        )
+        try:
+            spine_result = caller.call(
+                stage=STAGE_NAME,
+                prompt=prompt,
+                model_role="spine",
+                response_schema=ChapterSpine,
+            )
+        except Exception as e:
+            log.warning(
+                "chapter_spine_failed",
+                chapter=section.title,
+                error=str(e),
+            )
+            # Save raw failure for inspection
+            failed_dir = out_dir / "failed"
+            failed_dir.mkdir(parents=True, exist_ok=True)
+            write_text(failed_dir / f"chapter_{idx}_error.txt", str(e))
+            warnings.append(f"spine_extraction_failed: '{section.title}' — {e}")
+            continue
 
         # Ensure target words are set correctly (model may not return these)
-        spine.source_word_count = word_count
-        spine.target_word_count = target_words
-        spine.section_id = section.section_id
+        spine_result.source_word_count = word_count
+        spine_result.target_word_count = target_words
+        spine_result.section_id = section.section_id
 
-        chapter_spines.append(spine)
+        chapter_spines.append(spine_result)
         total_source += word_count
         total_target += target_words
 
         log.info(
             "chapter_spine_extracted",
             chapter=section.title,
-            frameworks=len(spine.frameworks),
-            examples=len(spine.key_examples),
-            moves=len(spine.argumentative_moves),
-            terms=len(spine.key_terms),
+            frameworks=len(spine_result.frameworks),
+            examples=len(spine_result.key_examples),
+            moves=len(spine_result.argumentative_moves),
+            terms=len(spine_result.key_terms),
         )
 
     full_spine = Spine(
@@ -118,8 +134,6 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
         total_target_words=total_target,
     )
 
-    out_dir = working_dir / STAGE_NAME
-    out_dir.mkdir(parents=True, exist_ok=True)
     write_json(out_dir / "spine.json", full_spine)
 
     elapsed = perf_counter() - t0

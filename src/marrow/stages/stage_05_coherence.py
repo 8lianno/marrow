@@ -8,7 +8,6 @@ Phase D: Assemble final Obsidian markdown output.
 
 from __future__ import annotations
 
-import difflib
 import re
 import shutil
 from datetime import UTC, datetime
@@ -39,24 +38,45 @@ STAGE_NAME = "05_coherence"
 # ---- Phase A: Deterministic spine coverage ----
 
 
+def _normalize_text(text: str) -> str:
+    """Lowercase, strip punctuation, collapse whitespace."""
+    text = text.lower()
+    text = re.sub(r"[^\w\s]", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def _fuzzy_contains(haystack: str, needle: str, threshold: float) -> bool:
-    """Check if needle appears in haystack with fuzzy matching."""
+    """Check if needle appears in haystack using progressively looser matching."""
     haystack_lower = haystack.lower()
     needle_lower = needle.lower()
 
-    # Exact substring match first
+    # 1. Exact substring match (case-insensitive)
     if needle_lower in haystack_lower:
         return True
 
-    # Fuzzy: check if any window of haystack is similar enough to needle
-    needle_words = needle_lower.split()
-    if len(needle_words) <= 2:
-        # For short terms, just check substring
-        return needle_lower in haystack_lower
+    # 2. Normalized match: strip punctuation, collapse whitespace
+    hay_norm = _normalize_text(haystack)
+    needle_norm = _normalize_text(needle)
+    if needle_norm in hay_norm:
+        return True
 
-    # For longer phrases, use SequenceMatcher on a sliding window
-    ratio = difflib.SequenceMatcher(None, needle_lower, haystack_lower).ratio()
-    return ratio >= threshold
+    # 3. Token-window match: check if ≥70% of the needle's words appear
+    #    within any 50-word window of the haystack
+    needle_words = needle_norm.split()
+    if not needle_words:
+        return True
+
+    hay_words = hay_norm.split()
+    window_size = 50
+    required = max(1, int(len(needle_words) * threshold))
+
+    for start in range(0, max(1, len(hay_words) - window_size + 1)):
+        window = set(hay_words[start : start + window_size])
+        matched = sum(1 for w in needle_words if w in window)
+        if matched >= required:
+            return True
+
+    return False
 
 
 def _check_spine_coverage(
@@ -69,7 +89,9 @@ def _check_spine_coverage(
 
     dist_map: dict[str, str] = {}
     for cd in distillation.chapters:
-        dist_map[str(cd.section_id)] = cd.body_md
+        # Strip [p:uuid] citation tokens before matching
+        clean_text = re.sub(r"\[p:[a-f0-9-]+\]", "", cd.body_md)
+        dist_map[str(cd.section_id)] = clean_text
 
     for cs in spine.chapters:
         chapter_text = dist_map.get(str(cs.section_id), "")
@@ -174,13 +196,15 @@ def _fix_chapter(
         stage=STAGE_NAME,
         prompt=prompt,
         model_role="distill",
+        max_tokens=chapter_spine.target_word_count * 2,  # generous ceiling
     )
 
+    body_text = fixed_text if isinstance(fixed_text, str) else str(fixed_text)
     return ChapterDistillation(
         chapter_title=chapter_dist.chapter_title,
         section_id=chapter_dist.section_id,
-        body_md=fixed_text if isinstance(fixed_text, str) else fixed_text.body_md,
-        word_count=len(str(fixed_text).split()),
+        body_md=body_text,
+        word_count=len(body_text.split()),
         continuation_rounds=chapter_dist.continuation_rounds,
     )
 
