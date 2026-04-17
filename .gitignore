@@ -23,6 +23,7 @@ coverage.xml
 .env.local
 
 runs/
+input/
 
 # Book files (large binaries, don't commit)
 tests/fixtures/books/*.epub
