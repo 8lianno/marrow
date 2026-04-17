@@ -76,6 +76,81 @@ Codex-default pipeline with runtime optimization, smart titles, and dual mode.
 
 ---
 
+## [0.2.2] — 2026-04-17
+
+Richer spines, parallel stages, spine in output.
+
+### Added
+
+- **Parallel spine extraction** — `ThreadPoolExecutor(max_workers=3)` for
+  Stage 3. Cuts spine stage from ~15 min sequential to ~6 min.
+- **Parallel distillation** — same pattern for Stage 4.
+- **Thread-safe SQLite ledger** — `threading.Lock` + WAL mode for parallel writes.
+- **Spine callouts in markdown** — collapsible Obsidian `[!abstract]` callout
+  before each chapter showing thesis, frameworks, examples, argument flow.
+- **Spine callouts in EPUB** — styled `.spine-callout` div per chapter.
+- **Voice instruction upgrade** — ghostwriting-grade prompt: "copy the author's
+  register, sentence rhythm, distinctive tics."
+- **Pre-flight cost estimation** — provider-aware: codex stages excluded from
+  projection, preventing false $3 ceiling aborts.
+
+### Changed
+
+- **Spine caps unclamped** — soft guidance (3-10 per category) replaces hard
+  5/5/8/5 limits. Spines are 2-3× richer.
+- **Retry prompt** — asks for valid JSON instead of shorter output.
+- **Codex progress logging** — `Popen` with 15-second heartbeat replaces silent
+  `subprocess.run`.
+- **Auth/quota detection** — clear error messages for codex login failures and
+  quota exhaustion.
+- **CLI summary** — shows LLM call count per stage from ledger.
+
+### Fixed
+
+- `body_text` type assertion in coherence fix-up (was defensive in wrong direction).
+- Duplicate chapter heading stripped from distilled body in EPUB.
+
+---
+
+## [0.2.1] — 2026-04-17
+
+Codex CLI provider, EPUB export, bug fixes.
+
+### Added
+
+- **Codex CLI provider** — `_codex_call` in `LLMCaller` invokes `codex exec`
+  as a subprocess. Prompt piped via stdin, schema via `--output-schema` temp
+  file. 60-min timeout, quota detection.
+- **EPUB export** — clean `.epub` generated in Stage 5 with proper CSS, chapter
+  navigation, and spine appendix. No citation clutter.
+- **`configs/gemini.yaml`** — full-Gemini fallback preset for speed/determinism.
+- **AGENTS.md** — Codex CLI project instructions, auto-loaded before sessions.
+
+### Changed
+
+- Default provider: codex for spine/distill/coherence, gemini-flash-lite for classify.
+- Model IDs use codex default from `~/.codex/config.toml` (not hardcoded).
+
+### Fixed
+
+- Spine max_tokens raised to 16K (was 8K default, caused truncated JSON).
+- Spine prompt caps paragraph_ids at 1-3 per item (was unlimited, inflated JSON).
+- Spine schema fields made optional with defaults (model sometimes omits
+  `source_word_count`, `target_word_count`, `definition`).
+- Spine extraction uses free-text mode instead of `response_schema` (avoids
+  structured output truncation limits).
+- EPUB chapter detection improved for badly-structured EPUBs: HTML `<p>` tag
+  extraction, word-form chapter number regex, auto-split large sections at
+  ~5K word boundaries.
+- Fuzzy matching algorithm replaced: 3-tier (exact → normalized → token-window)
+  instead of broken `SequenceMatcher`.
+- Citation tokens stripped before coverage checks.
+- Voice sample added to continuation prompt.
+- Classification validation: degenerate ratios fall back to uniform compression.
+- `--resume` wired in CLI and orchestrator.
+
+---
+
 ## [0.2.0] — 2026-04-17
 
 Complete rebuild of the distillation pipeline. Replaces the 8-stage v0.1.0
