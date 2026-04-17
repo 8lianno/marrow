@@ -89,11 +89,11 @@ is wrong, you can see whether selection or writing failed.
 
 ```mermaid
 graph LR
-    subgraph MODELS ["Models used"]
+    subgraph MODELS ["Gemini models"]
         direction TB
-        FLASH["⚡ Gemini Flash<br/><sub>thinking mode</sub>"]:::flash
-        PRO["🔷 Gemini Pro"]:::pro
-        SONNET["🟣 Claude Sonnet"]:::sonnet
+        FLASH["⚡ Flash<br/><sub>thinking mode</sub>"]:::flash
+        PRO["🔷 Pro"]:::pro
+        PROT["🔷 Pro<br/><sub>thinking mode</sub>"]:::pro
     end
 
     I["📄 Ingest<br/><sub>no LLM</sub>"]:::stage
@@ -110,12 +110,11 @@ graph LR
     FLASH -.-> C
     FLASH -.-> S
     PRO -.-> D
-    SONNET -.-> V
+    PROT -.-> V
 
     classDef stage fill:#16213e,stroke:#0f3460,color:#fff
     classDef flash fill:#e94560,stroke:#fff,color:#fff
     classDef pro fill:#0f3460,stroke:#fff,color:#fff
-    classDef sonnet fill:#533483,stroke:#fff,color:#fff
 
     style MODELS fill:#1a1a2e20,stroke:#533483,stroke-width:1px
 ```
@@ -123,12 +122,12 @@ graph LR
 | Stage | Model | What it does | Cost |
 |-------|-------|-------------|------|
 | **Ingest** | — | Docling parses PDF/EPUB into structured chapters with page provenance | $0 |
-| **Classify** | Flash | Labels each section as intro/body/conclusion/appendix (sets compression ratio) | ~$0.02 |
-| **Spine** | Flash (thinking) | Extracts thesis, frameworks, examples, argumentative moves, key terms per chapter | ~$0.10 |
-| **Distill** | Pro | Compresses each chapter to 30% against its spine, matching the author's voice | ~$1.00 |
-| **Coherence** | Sonnet + Pro | Audits whole book for gaps, voice drift, broken threads; Pro fixes flagged chapters | ~$0.50 |
+| **Classify** | Gemini 2.5 Flash | Labels each section as intro/body/conclusion/appendix (sets compression ratio) | ~$0.02 |
+| **Spine** | Gemini 2.5 Flash (thinking) | Extracts thesis, frameworks, examples, argumentative moves, key terms per chapter | ~$0.10 |
+| **Distill** | Gemini 2.5 Pro | Compresses each chapter to 30% against its spine, matching the author's voice | ~$1.00 |
+| **Coherence** | Gemini 2.5 Pro (thinking) | Audits whole book for gaps, voice drift, broken threads; fixes flagged chapters | ~$0.50 |
 
-**Total: ~$1.50–2.00 per book. Runtime: ~15–25 minutes.**
+**Total: ~$1.50–2.00 per book. Runtime: ~15–25 minutes. One API key: `GEMINI_API_KEY`.**
 
 ## Quick start
 
@@ -137,9 +136,8 @@ graph LR
 uv venv && source .venv/bin/activate
 uv pip install -e .
 
-# Set API keys
+# Set API key (only one needed — everything runs on Gemini)
 export GEMINI_API_KEY=...
-export ANTHROPIC_API_KEY=sk-ant-...
 
 # Distill a book
 marrow book.pdf
@@ -175,8 +173,7 @@ Config resolution: **built-in defaults → `configs/default.yaml` → `--config`
 → env vars (`MARROW_*`) → CLI flags**.
 
 ```bash
-GEMINI_API_KEY=...              # Required (spine + distill)
-ANTHROPIC_API_KEY=sk-ant-...    # Required (coherence)
+GEMINI_API_KEY=...              # Required (all stages)
 MARROW_RUNS_DIR=./runs          # Working directory root
 MARROW_OBSIDIAN_VAULT=/path     # Auto-export to vault
 MARROW_COST_MAX_PER_BOOK=3.00   # Hard ceiling (aborts if exceeded)

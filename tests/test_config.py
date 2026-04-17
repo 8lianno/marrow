@@ -21,8 +21,9 @@ def test_model_defaults() -> None:
     assert cfg.models.distill.provider == "gemini"
     assert cfg.models.distill.model_id == "gemini-2.5-pro"
     assert cfg.models.distill.thinking is False
-    assert cfg.models.coherence.provider == "anthropic"
-    assert cfg.models.coherence.model_id == "claude-sonnet-4-6"
+    assert cfg.models.coherence.provider == "gemini"
+    assert cfg.models.coherence.model_id == "gemini-2.5-pro"
+    assert cfg.models.coherence.thinking is True
 
 
 def test_overrides_apply() -> None:

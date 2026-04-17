@@ -53,7 +53,7 @@ class CostConfig(BaseModel):
 
 
 class ModelRoute(BaseModel):
-    provider: Literal["anthropic", "gemini", "stub"] = "stub"
+    provider: Literal["gemini", "stub"] = "stub"
     model_id: str = "stub"
     api_key_env: str | None = None
     thinking: bool = False  # enable Gemini thinking mode
@@ -79,9 +79,11 @@ class ModelsConfig(BaseModel):
     )
     coherence: ModelRoute = Field(
         default_factory=lambda: ModelRoute(
-            provider="anthropic",
-            model_id="claude-sonnet-4-6",
-            api_key_env="ANTHROPIC_API_KEY",
+            provider="gemini",
+            model_id="gemini-2.5-pro",
+            api_key_env="GEMINI_API_KEY",
+            thinking=True,
+            thinking_budget=16384,
         )
     )
 

@@ -34,22 +34,24 @@ book.pdf
   → 2. Classify (Flash, one call)                 → classification.json
   → 3. Spine    (Flash-thinking, one call/chapter) → spine.json
   → 4. Distill  (Pro, one call/chapter + continuation) → distillation.json
-  → 5. Coherence (deterministic + Sonnet + Flash fix-ups) → final output
+  → 5. Coherence (deterministic + Pro-thinking audit + Pro fix-ups) → final output
 ```
 
-### Model Roles
+### Model Roles (all Gemini — single API key)
 | Role | Model | Why |
 |------|-------|-----|
-| Spine extraction | Gemini 2.5 Flash (thinking=true) | Needs reasoning to decide what's load-bearing. Cheap. |
+| Classify | Gemini 2.5 Flash (thinking) | Cheap section-type detection. |
+| Spine extraction | Gemini 2.5 Flash (thinking) | Needs reasoning to decide what's load-bearing. Cheap. |
 | Distillation | Gemini 2.5 Pro | Needs high-quality prose at 30% compression. |
-| Coherence audit | Claude Sonnet 4.6 | Whole-book reasoning, one call. |
+| Coherence audit | Gemini 2.5 Pro (thinking) | Whole-book reasoning with deep thinking. |
 | Fix-ups | Gemini 2.5 Pro (reuses distill route) | Targeted chapter rewrites. |
 
 ### Key Design Decisions
+- **Gemini-only**: All stages use Gemini models. One API key, one provider, no vendor split.
 - **Spine/distill split**: Selection (spine) is separate from generation (distill). The spine is a first-class artifact.
 - **Length by construction**: `target_words = source_words * compression_ratio`. No prompted hopes.
 - **Deterministic verification**: Spine items fuzzy-matched against distillation text. Not an LLM vibes check.
-- **Thinking mode**: Spine extraction uses Gemini thinking for structured reasoning before answering.
+- **Thinking mode**: Spine extraction (Flash) and coherence audit (Pro) use Gemini thinking for structured reasoning.
 - **No local models**: API models only. Quality over cost. ~$1-3/book.
 
 ## Key Directories
@@ -139,8 +141,7 @@ Every artifact crossing a stage boundary is a Pydantic v2 model serialized to JS
 ## Environment Variables
 
 ```bash
-GEMINI_API_KEY=...              # Required for spine + distill
-ANTHROPIC_API_KEY=sk-ant-...    # Required for coherence
+GEMINI_API_KEY=...              # Required (all stages)
 MARROW_RUNS_DIR=./runs          # Working directory root
 MARROW_LOG_LEVEL=INFO           # DEBUG | INFO | WARNING | ERROR
 MARROW_OBSIDIAN_VAULT=/path     # If set, exports go here
@@ -155,9 +156,10 @@ pytest tests/ -v                  # all tests including Docling
 ```
 
 ## Cost Targets
+- Classify (Flash): ~$0.02/book
 - Spine extraction (Flash-thinking): ~$0.10/book
 - Distillation (Pro): ~$1.00/book
-- Coherence (Sonnet): ~$0.40/book
+- Coherence (Pro-thinking): ~$0.40/book
 - Fix-ups (Pro): ~$0.20/book
 - **Total: ~$1.50-2.00/book**
 

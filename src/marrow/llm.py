@@ -16,7 +16,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel
 
 from marrow.config import MarrowConfig
-from marrow.errors import BudgetExceeded, CostCeilingHit, LLMError
+from marrow.errors import BudgetExceeded, LLMError
 from marrow.io import write_json
 from marrow.logging import get_logger
 from marrow.store.ledger import CostLedger
@@ -26,8 +26,6 @@ log = get_logger(__name__)
 
 # Per-1k-token pricing (approximate, 2026-04).
 _PRICING_USD_PER_1K: dict[tuple[str, str], tuple[float, float]] = {
-    ("anthropic", "claude-sonnet-4-6"): (0.003, 0.015),
-    ("anthropic", "claude-opus-4-6"): (0.015, 0.075),
     ("gemini", "gemini-2.5-flash"): (0.00015, 0.0006),
     ("gemini", "gemini-2.5-pro"): (0.00125, 0.005),
     ("stub", "*"): (0.0, 0.0),
@@ -109,8 +107,6 @@ class LLMCaller:
         if provider == "stub":
             text = self._stub_response(prompt, response_schema)
             raw = LLMResponse(text, _approx_tokens(prompt), _approx_tokens(text), "STOP")
-        elif provider == "anthropic":
-            raw = self._anthropic_call(model_id, prompt, response_schema, max_tokens)
         elif provider == "gemini":
             raw = self._gemini_call(
                 model_id, prompt, response_schema, route.api_key_env, max_tokens,
@@ -156,27 +152,6 @@ class LLMCaller:
             raise BudgetExceeded(
                 f"Spent ${spent:.4f} reached cap ${cap:.2f}. Re-run with a higher cost cap."
             )
-
-    def _anthropic_call(
-        self, model_id: str, prompt: str, response_schema: type[T] | None, max_tokens: int
-    ) -> LLMResponse:
-        try:
-            from anthropic import Anthropic
-        except ImportError as e:
-            raise LLMError(f"anthropic SDK not installed: {e}") from e
-
-        client = Anthropic()
-        msg = client.messages.create(
-            model=model_id,
-            max_tokens=max_tokens,
-            temperature=0.0,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = "".join(getattr(b, "text", "") for b in msg.content)
-        finish = msg.stop_reason or "end_turn"
-        # Map Anthropic stop reasons to a common format
-        finish_reason = "MAX_TOKENS" if finish == "max_tokens" else "STOP"
-        return LLMResponse(text, msg.usage.input_tokens, msg.usage.output_tokens, finish_reason)
 
     def _gemini_call(
         self,
