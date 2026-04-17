@@ -12,7 +12,7 @@ def test_codex_provider_is_registered_in_config() -> None:
     """Sanity: codex is a valid provider value in ModelRoute."""
     from marrow.config import ModelRoute
 
-    route = ModelRoute(provider="codex", model_id="gpt-5.1-codex")
+    route = ModelRoute(provider="codex", model_id="")
     assert route.provider == "codex"
 
 

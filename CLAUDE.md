@@ -41,9 +41,9 @@ book.pdf
 | Role | Provider | Model | Why |
 |------|----------|-------|-----|
 | Classify | Gemini | `gemini-flash-lite-latest` | One cheap call; not worth routing to codex |
-| Spine | Codex CLI | `gpt-5.1-codex` | 10-17 calls/book; subscription-free |
-| Distill | Codex CLI | `gpt-5.1-codex` | 10-15 calls/book; the cost hog, now free |
-| Coherence | Codex CLI | `gpt-5.1-codex` | One whole-book call; free |
+| Spine | Codex CLI | (from `~/.codex/config.toml`) | 10-17 calls/book; subscription-free |
+| Distill | Codex CLI | (from `~/.codex/config.toml`) | 10-15 calls/book; the cost hog, now free |
+| Coherence | Codex CLI | (from `~/.codex/config.toml`) | One whole-book call; free |
 
 ### Key Design Decisions
 - **Codex default, Gemini fallback**: Heavy stages use Codex CLI (subscription, $0 marginal). Use `--config configs/gemini.yaml` for speed/determinism.

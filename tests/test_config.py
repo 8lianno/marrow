@@ -18,7 +18,7 @@ def test_model_defaults() -> None:
     assert cfg.models.classify.provider == "gemini"
     assert cfg.models.classify.model_id == "gemini-flash-lite-latest"
     assert cfg.models.spine.provider == "codex"
-    assert cfg.models.spine.model_id == "gpt-5.1-codex"
+    assert cfg.models.spine.model_id == ""
     assert cfg.models.distill.provider == "codex"
     assert cfg.models.coherence.provider == "codex"
 

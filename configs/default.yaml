@@ -33,15 +33,15 @@ models:
   # zero marginal cost). Slower but free if you already pay for ChatGPT.
   spine:
     provider: codex
-    model_id: gpt-5.1-codex
+    model_id: ""
 
   distill:
     provider: codex
-    model_id: gpt-5.1-codex
+    model_id: ""
 
   coherence:
     provider: codex
-    model_id: gpt-5.1-codex
+    model_id: ""
 
 logging:
   level: INFO

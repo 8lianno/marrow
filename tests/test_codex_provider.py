@@ -21,7 +21,7 @@ def test_codex_provider_returns_text(tmp_path: Path) -> None:
             "models": {
                 "spine": {
                     "provider": "codex",
-                    "model_id": "gpt-5.1-codex",
+                    "model_id": "",
                 }
             },
         }
@@ -54,7 +54,7 @@ def test_codex_provider_with_schema(tmp_path: Path) -> None:
             "models": {
                 "spine": {
                     "provider": "codex",
-                    "model_id": "gpt-5.1-codex",
+                    "model_id": "",
                 }
             },
         }

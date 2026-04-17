@@ -71,19 +71,19 @@ class ModelsConfig(BaseModel):
     spine: ModelRoute = Field(
         default_factory=lambda: ModelRoute(
             provider="codex",
-            model_id="gpt-5.1-codex",
+            model_id="",
         )
     )
     distill: ModelRoute = Field(
         default_factory=lambda: ModelRoute(
             provider="codex",
-            model_id="gpt-5.1-codex",
+            model_id="",
         )
     )
     coherence: ModelRoute = Field(
         default_factory=lambda: ModelRoute(
             provider="codex",
-            model_id="gpt-5.1-codex",
+            model_id="",
         )
     )
 
