@@ -94,6 +94,7 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
                 prompt=prompt,
                 model_role="spine",
                 response_schema=ChapterSpine,
+                max_tokens=16384,
             )
         except Exception as e:
             log.warning(

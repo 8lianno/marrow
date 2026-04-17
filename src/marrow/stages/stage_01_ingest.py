@@ -398,7 +398,285 @@ def _docling_version() -> str:
 # ---- Fallback path (Docling unavailable) ----
 
 
+def _epub_spine_sections(book_path: Path, slug: str) -> list[SectionNode]:
+    """Split EPUB by spine items, extracting headings and paragraphs from HTML."""
+    try:
+        from bs4 import BeautifulSoup
+
+        with ZipFile(book_path) as zf:
+            paths = _epub_spine_paths(zf)
+            sections: list[SectionNode] = []
+
+            for path in paths:
+                try:
+                    raw = zf.read(path)
+                except KeyError:
+                    continue
+
+                soup = BeautifulSoup(raw, "html.parser")
+                for tag in soup(["script", "style", "svg"]):
+                    tag.decompose()
+
+                # Extract heading
+                heading = None
+                for tag in soup.find_all(["h1", "h2", "h3"]):
+                    candidate = _normalize_inline_whitespace(tag.get_text(" ", strip=True))
+                    if candidate and len(candidate) < 120:
+                        heading = candidate
+                        tag.decompose()  # remove from body so it's not repeated
+                        break
+                title = heading or PurePosixPath(path).stem.replace("-", " ").replace("_", " ").title()
+
+                # Extract paragraphs from <p> tags
+                chapter_path = [title]
+                paragraphs: list[ParagraphNode] = []
+                for p_tag in soup.find_all("p"):
+                    text = _normalize_inline_whitespace(p_tag.get_text(" ", strip=True))
+                    if text and len(text) > 10:
+                        paragraphs.append(
+                            ParagraphNode(
+                                paragraph_id=paragraph_id(text, chapter_path, 1),
+                                text=text,
+                                page_start=1,
+                                page_end=1,
+                            )
+                        )
+
+                # Fallback: if no <p> tags, split by newlines
+                if not paragraphs:
+                    plain = soup.get_text("\n", strip=True)
+                    for line in plain.split("\n"):
+                        line = _normalize_inline_whitespace(line)
+                        if line and len(line) > 10:
+                            paragraphs.append(
+                                ParagraphNode(
+                                    paragraph_id=paragraph_id(line, chapter_path, 1),
+                                    text=line,
+                                    page_start=1,
+                                    page_end=1,
+                                )
+                            )
+
+                if not paragraphs or sum(len(p.text.split()) for p in paragraphs) < 30:
+                    continue
+
+                sections.append(
+                    SectionNode(
+                        section_id=section_id(title, 1, []),
+                        title=title,
+                        level=1,
+                        paragraphs=paragraphs,
+                    )
+                )
+            return sections
+    except Exception:
+        return []
+
+
+_WORD_NUMBERS = (
+    r"one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty"
+)
+
+_CHAPTER_HEADING_RE = re.compile(
+    r"^(?:chapter\s+(?:\d+|" + _WORD_NUMBERS + r"))(?:\s.*)?$",
+    re.IGNORECASE,
+)
+_SECTION_HEADING_RE = re.compile(
+    r"^(?:introduction|preface|prologue|epilogue|conclusion|afterword)$",
+    re.IGNORECASE,
+)
+
+
+def _split_paragraphs_by_chapter(
+    paragraphs: list[ParagraphNode], slug: str
+) -> list[SectionNode]:
+    """Re-split a flat list of paragraphs into sections by detecting chapter headings.
+
+    Handles poorly-structured EPUBs where the TOC lists chapter names as short
+    paragraphs, then the body text flows continuously. Strategy:
+    1. Scan for heading-like paragraphs (short, matching chapter/intro/epilogue patterns)
+    2. Skip TOC region (cluster of consecutive headings)
+    3. Each heading starts a new section; body paragraphs go into the current section
+    """
+    sections: list[SectionNode] = []
+    current_title: str | None = None
+    current_paras: list[ParagraphNode] = []
+
+    # First pass: find all heading positions
+    heading_indices: list[int] = []
+    for i, p in enumerate(paragraphs):
+        text = p.text.strip()
+        if _CHAPTER_HEADING_RE.match(text) or _SECTION_HEADING_RE.match(text):
+            heading_indices.append(i)
+
+    # Detect TOC: a heading is a TOC entry if the next heading comes within a few
+    # paragraphs AND there's no substantial content between them. A heading followed
+    # by substantial content (>100 words before the next heading) is a real chapter start.
+    toc_indices: set[int] = set()
+    for j, idx in enumerate(heading_indices):
+        next_heading = heading_indices[j + 1] if j + 1 < len(heading_indices) else len(paragraphs)
+        # Count words between this heading and the next
+        words_between = sum(
+            len(paragraphs[k].text.split())
+            for k in range(idx + 1, min(next_heading, len(paragraphs)))
+        )
+        if words_between < 100:
+            toc_indices.add(idx)
+
+    body_heading_indices = set(heading_indices) - toc_indices
+
+    for i, p in enumerate(paragraphs):
+        text = p.text.strip()
+
+        if i in toc_indices:
+            continue  # skip TOC entries
+
+        if i in body_heading_indices:
+            # Save previous section
+            if current_title and current_paras:
+                sections.append(
+                    SectionNode(
+                        section_id=section_id(current_title, 1, []),
+                        title=current_title,
+                        level=1,
+                        paragraphs=current_paras,
+                    )
+                )
+            current_title = text
+            current_paras = []
+        elif current_title:
+            if len(text.split()) > 5:  # skip very short decorative lines
+                current_paras.append(p)
+        elif len(text.split()) > 20 and not current_title:
+            # Content before first heading → "Front Matter"
+            current_title = "Front Matter"
+            current_paras.append(p)
+
+    # Save the last section
+    if current_title and current_paras:
+        sections.append(
+            SectionNode(
+                section_id=section_id(current_title, 1, []),
+                title=current_title,
+                level=1,
+                paragraphs=current_paras,
+            )
+        )
+
+    # If we ended up with very few large sections, auto-split them into
+    # ~5000-word chunks so that LLM calls don't hit token limits.
+    final_sections: list[SectionNode] = []
+    for s in sections:
+        wc = sum(len(p.text.split()) for p in s.paragraphs)
+        if wc > 8000:
+            parts = _split_large_section(s, target_words=5000)
+            final_sections.extend(parts)
+        else:
+            final_sections.append(s)
+
+    return final_sections
+
+
+def _split_large_section(section: SectionNode, target_words: int = 5000) -> list[SectionNode]:
+    """Split a large section into sub-sections of ~target_words at paragraph boundaries."""
+    parts: list[SectionNode] = []
+    current_paras: list[ParagraphNode] = []
+    current_words = 0
+    part_num = 1
+
+    for p in section.paragraphs:
+        pw = len(p.text.split())
+        current_paras.append(p)
+        current_words += pw
+
+        if current_words >= target_words:
+            title = f"{section.title} (Part {part_num})"
+            parts.append(
+                SectionNode(
+                    section_id=section_id(title, 1, []),
+                    title=title,
+                    level=1,
+                    paragraphs=current_paras,
+                )
+            )
+            current_paras = []
+            current_words = 0
+            part_num += 1
+
+    if current_paras:
+        title = f"{section.title} (Part {part_num})" if part_num > 1 else section.title
+        parts.append(
+            SectionNode(
+                section_id=section_id(title, 1, []),
+                title=title,
+                level=1,
+                paragraphs=current_paras,
+            )
+        )
+
+    return parts
+
+
+def _build_fallback_doc(
+    book_path: Path,
+    slug: str,
+    sections: list[SectionNode],
+    title: str | None,
+    author: str | None,
+) -> tuple[CanonicalDocument, ChapterCoverageAudit]:
+    paragraph_count = sum(len(s.paragraphs) for s in sections)
+    word_count = sum(len(p.text.split()) for s in sections for p in s.paragraphs)
+    total_text = " ".join(p.text for s in sections for p in s.paragraphs)
+
+    doc = CanonicalDocument(
+        book_slug=slug,
+        book_title=title or book_path.stem.replace("-", " ").title(),
+        book_author=author,
+        source_format="epub",
+        source_path=str(book_path.resolve()),
+        page_count=max(1, _estimate_pages(total_text)),
+        word_count=word_count,
+        parser="fallback@epub-spine",
+        parser_mode="text_only",
+        toc=sections,
+        extracted_at=datetime.now(UTC),
+    )
+
+    audit = ChapterCoverageAudit(
+        toc_chapters_declared=0,
+        headings_detected=len(sections),
+        paragraphs_detected=paragraph_count,
+        tables_detected=0,
+        coverage_pct=100.0 if sections else 0.0,
+        audit_passed=bool(sections),
+    )
+    return doc, audit
+
+
 def _ingest_fallback(book_path: Path, slug: str) -> tuple[CanonicalDocument, ChapterCoverageAudit]:
+    # For EPUBs, extract paragraphs from HTML then re-split by chapter headings.
+    if book_path.suffix.lower() == ".epub":
+        spine_sections = _epub_spine_sections(book_path, slug)
+
+        # If spine items have real chapter titles (not "Index Split"), use directly
+        has_real_titles = any(
+            not s.title.lower().startswith(("index split", "document outline"))
+            and len(s.title) > 3
+            for s in spine_sections
+        )
+        if len(spine_sections) >= 3 and has_real_titles:
+            title, author = _extract_fallback_metadata(book_path)
+            return _build_fallback_doc(book_path, slug, spine_sections, title, author)
+
+        # Otherwise: merge all paragraphs and re-split by chapter headings
+        if spine_sections:
+            all_paragraphs = [p for s in spine_sections for p in s.paragraphs]
+            sections = _split_paragraphs_by_chapter(all_paragraphs, slug)
+            if len(sections) > 1:
+                title, author = _extract_fallback_metadata(book_path)
+                return _build_fallback_doc(book_path, slug, sections, title, author)
+
     text = _extract_plain_text(book_path)
     sections = _heuristic_split_sections(text, slug)
     title, author = _extract_fallback_metadata(book_path)
@@ -563,8 +841,14 @@ def _normalize_inline_whitespace(text: str) -> str:
 
 
 def _heuristic_split_sections(text: str, slug: str) -> list[SectionNode]:
-    """Detect chapter headings in plain text via leading 'Chapter N:' patterns."""
-    chapter_re = re.compile(r"^\s*(chapter\s+\d+[:.]?\s*.*)$", re.IGNORECASE | re.MULTILINE)
+    """Detect chapter headings in plain text via common heading patterns."""
+    # Match: "Chapter 1:", "Chapter One", "CHAPTER THREE", "Introduction", "Epilogue", "Part 2"
+    chapter_re = re.compile(
+        r"^\s*((?:chapter|part)\s+(?:\d+|" + _WORD_NUMBERS + r")[:.]?\s*.*"
+        r"|introduction|preface|prologue|epilogue|conclusion|afterword"
+        r")$",
+        re.IGNORECASE | re.MULTILINE,
+    )
     matches = list(chapter_re.finditer(text))
 
     if not matches:

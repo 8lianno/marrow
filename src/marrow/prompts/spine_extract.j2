@@ -8,8 +8,9 @@ Rules:
 3. An ARGUMENTATIVE MOVE is a discrete step in the chapter's logical progression ("introduces the measurement problem", "rejects behaviorist explanation", "derives implication for policy"). List them in order.
 4. A KEY TERM is vocabulary the author defines or uses in a load-bearing technical sense.
 5. Load-bearing means: if you cut it, the chapter's argument is weaker or unclear.
-6. Do not invent. Every item MUST be grounded in specific paragraphs from the input (cite paragraph_ids).
+6. Do not invent. Every item MUST be grounded in specific paragraphs from the input. Cite the 1-3 MOST RELEVANT paragraph_ids only — do not list every paragraph that mentions the concept.
 7. VOICE SAMPLE: pick 2-3 consecutive sentences that best represent HOW this author writes. Paste them verbatim. Choose sentences that show the author's distinctive style, not generic exposition.
+8. Keep the output CONCISE. Descriptions should be one sentence. Do not over-elaborate.
 
 CHAPTER TITLE: {{ chapter.title }}
 CHAPTER INDEX: {{ chapter_index }}
@@ -26,10 +27,10 @@ Return a JSON object with these fields:
   "chapter_title": "...",
   "section_id": "{{ section_id }}",
   "thesis": "one sentence: what this chapter argues or establishes",
-  "frameworks": [{"name": "...", "description": "one-sentence gloss", "paragraph_ids": ["..."]}],
-  "key_examples": [{"label": "short identifier", "gist": "one sentence", "concept_illustrated": "which framework or argument this supports", "paragraph_ids": ["..."], "is_load_bearing": true}],
+  "frameworks": [{"name": "...", "description": "one-sentence gloss", "paragraph_ids": ["id1", "id2"]}],
+  "key_examples": [{"label": "short identifier", "gist": "one sentence", "concept_illustrated": "which framework this supports", "paragraph_ids": ["id1"], "is_load_bearing": true}],
   "argumentative_moves": ["move 1 in order", "move 2", ...],
-  "key_terms": [{"term": "...", "definition": "author's definition, close-paraphrased", "paragraph_ids": ["..."]}],
+  "key_terms": [{"term": "...", "definition": "one-sentence definition", "paragraph_ids": ["id1"]}],
   "voice_sample": "2-3 consecutive verbatim sentences"
 }
 
