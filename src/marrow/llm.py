@@ -25,9 +25,12 @@ T = TypeVar("T", bound=BaseModel)
 log = get_logger(__name__)
 
 # Per-1k-token pricing (approximate, 2026-04).
+# Per-1k-token pricing (April 2026, non-thinking output).
+# Thinking tokens cost ~6x more but are not billed as output.
 _PRICING_USD_PER_1K: dict[tuple[str, str], tuple[float, float]] = {
-    ("gemini", "gemini-2.5-flash"): (0.00015, 0.0006),
+    ("gemini", "gemini-2.5-flash"): (0.0006, 0.0006),
     ("gemini", "gemini-2.5-pro"): (0.00125, 0.005),
+    ("gemini", "gemini-3-flash-preview"): (0.0005, 0.003),
     ("stub", "*"): (0.0, 0.0),
 }
 

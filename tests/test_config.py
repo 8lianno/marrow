@@ -16,14 +16,11 @@ def test_defaults_load() -> None:
 def test_model_defaults() -> None:
     cfg = load_config()
     assert cfg.models.spine.provider == "gemini"
-    assert cfg.models.spine.model_id == "gemini-2.5-flash"
-    assert cfg.models.spine.thinking is True
+    assert cfg.models.spine.model_id == "gemini-3-flash-preview"
     assert cfg.models.distill.provider == "gemini"
-    assert cfg.models.distill.model_id == "gemini-2.5-pro"
-    assert cfg.models.distill.thinking is False
+    assert cfg.models.distill.model_id == "gemini-3-flash-preview"
     assert cfg.models.coherence.provider == "gemini"
-    assert cfg.models.coherence.model_id == "gemini-2.5-pro"
-    assert cfg.models.coherence.thinking is True
+    assert cfg.models.coherence.model_id == "gemini-3-flash-preview"
 
 
 def test_overrides_apply() -> None:

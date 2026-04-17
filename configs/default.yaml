@@ -1,6 +1,6 @@
 # Marrow v0.2 default configuration.
 # CLI flags > env vars (MARROW_*) > this file > built-in defaults.
-# All stages use Gemini models. Only GEMINI_API_KEY is required.
+# All stages use Gemini 3 Flash. Only GEMINI_API_KEY is required.
 
 ingest:
   parser: docling
@@ -22,28 +22,20 @@ cost:
   max_per_book: 3.00
 
 models:
-  # Flash with thinking for spine extraction — needs reasoning to decide
-  # what's load-bearing vs filler.
   spine:
     provider: gemini
-    model_id: gemini-2.5-flash
+    model_id: gemini-3-flash-preview
     api_key_env: GEMINI_API_KEY
-    thinking: true
-    thinking_budget: 8192
 
-  # Pro for distillation — needs high-quality prose generation.
   distill:
     provider: gemini
-    model_id: gemini-2.5-pro
+    model_id: gemini-3-flash-preview
     api_key_env: GEMINI_API_KEY
 
-  # Pro with thinking for coherence audit — whole-book reasoning.
   coherence:
     provider: gemini
-    model_id: gemini-2.5-pro
+    model_id: gemini-3-flash-preview
     api_key_env: GEMINI_API_KEY
-    thinking: true
-    thinking_budget: 16384
 
 logging:
   level: INFO
