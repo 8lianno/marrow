@@ -153,6 +153,37 @@ manifest.json         # cost, duration, model versions
 coherence_report.json # the audit results
 ```
 
+## Example: first successful run
+
+```bash
+marrow run "input/No More Mr. Nice Guy! - Robert A. Glover.epub" --force
+```
+
+Results on a 55,000-word / 129-page EPUB:
+
+| Metric | Result |
+|--------|--------|
+| Output | **78 pages** (21,603 words) |
+| Compression | 39.5% of source |
+| Spine success | 11 of 12 sections |
+| Coherence | PASS (no fix-ups needed) |
+| Cost | **$0.56** |
+| Runtime | **21 minutes** |
+| Tokens | 315K in / 84K out |
+
+Output folder:
+
+```
+runs/no-more-mr-nice-guy-robert-a-glover/05_coherence/
+├── no-more-mr-nice-guy-robert-a-glover.md           # the distillation (78 pages)
+├── no-more-mr-nice-guy-robert-a-glover.spine.md     # structural skeleton
+├── no-more-mr-nice-guy-robert-a-glover.source.md    # original with ^anchors
+├── manifest.json                                     # run metadata
+└── coherence_report.json                             # audit results
+```
+
+The `.md` file is the one you read. Open it in Obsidian and the `[p:uuid]` citations become clickable links to the `.source.md` file.
+
 ## CLI
 
 ```bash
