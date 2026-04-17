@@ -81,7 +81,7 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
         response_text = caller.call(
             stage=STAGE_NAME,
             prompt=prompt,
-            model_role="spine",  # reuse spine model for this cheap call
+            model_role="classify",
         )
 
         # Parse the response — it should be a JSON array

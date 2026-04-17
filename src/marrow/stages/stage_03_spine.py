@@ -96,18 +96,34 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
                 response_schema=ChapterSpine,
                 max_tokens=16384,
             )
-        except Exception as e:
-            log.warning(
-                "chapter_spine_failed",
-                chapter=section.title,
-                error=str(e),
+        except Exception as first_err:
+            # Retry once with a shorter prompt — the model likely truncated
+            log.warning("chapter_spine_retrying", chapter=section.title)
+            retry_prompt = (
+                prompt
+                + "\n\nIMPORTANT: Your previous response was truncated. "
+                "Return SHORTER output: max 3 frameworks, 3 examples, 5 moves, 3 terms. "
+                "Use 1 paragraph_id per item. Keep descriptions under 15 words."
             )
-            # Save raw failure for inspection
-            failed_dir = out_dir / "failed"
-            failed_dir.mkdir(parents=True, exist_ok=True)
-            write_text(failed_dir / f"chapter_{idx}_error.txt", str(e))
-            warnings.append(f"spine_extraction_failed: '{section.title}' — {e}")
-            continue
+            try:
+                spine_result = caller.call(
+                    stage=STAGE_NAME,
+                    prompt=retry_prompt,
+                    model_role="spine",
+                    response_schema=ChapterSpine,
+                    max_tokens=16384,
+                )
+            except Exception as retry_err:
+                log.warning(
+                    "chapter_spine_failed",
+                    chapter=section.title,
+                    error=str(retry_err),
+                )
+                failed_dir = out_dir / "failed"
+                failed_dir.mkdir(parents=True, exist_ok=True)
+                write_text(failed_dir / f"chapter_{idx}_error.txt", str(retry_err))
+                warnings.append(f"spine_extraction_failed: '{section.title}'")
+                continue
 
         # Ensure target words are set correctly (model may not return these)
         spine_result.source_word_count = word_count

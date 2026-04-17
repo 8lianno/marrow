@@ -16,11 +16,10 @@ def test_defaults_load() -> None:
 def test_model_defaults() -> None:
     cfg = load_config()
     assert cfg.models.spine.provider == "gemini"
-    assert cfg.models.spine.model_id == "gemini-3-flash-preview"
-    assert cfg.models.distill.provider == "gemini"
-    assert cfg.models.distill.model_id == "gemini-3-flash-preview"
-    assert cfg.models.coherence.provider == "gemini"
-    assert cfg.models.coherence.model_id == "gemini-3-flash-preview"
+    assert cfg.models.classify.model_id == "gemini-flash-lite-latest"
+    assert cfg.models.spine.model_id == "gemini-flash-latest"
+    assert cfg.models.distill.model_id == "gemini-flash-latest"
+    assert cfg.models.coherence.model_id == "gemini-flash-latest"
 
 
 def test_overrides_apply() -> None:

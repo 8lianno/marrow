@@ -1,6 +1,6 @@
 # Marrow v0.2 default configuration.
 # CLI flags > env vars (MARROW_*) > this file > built-in defaults.
-# All stages use Gemini 3 Flash. Only GEMINI_API_KEY is required.
+# All stages use Gemini Flash. Only GEMINI_API_KEY is required.
 
 ingest:
   parser: docling
@@ -22,19 +22,24 @@ cost:
   max_per_book: 3.00
 
 models:
+  classify:
+    provider: gemini
+    model_id: gemini-flash-lite-latest
+    api_key_env: GEMINI_API_KEY
+
   spine:
     provider: gemini
-    model_id: gemini-3-flash-preview
+    model_id: gemini-flash-latest
     api_key_env: GEMINI_API_KEY
 
   distill:
     provider: gemini
-    model_id: gemini-3-flash-preview
+    model_id: gemini-flash-latest
     api_key_env: GEMINI_API_KEY
 
   coherence:
     provider: gemini
-    model_id: gemini-3-flash-preview
+    model_id: gemini-flash-latest
     api_key_env: GEMINI_API_KEY
 
 logging:

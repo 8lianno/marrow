@@ -20,6 +20,7 @@ dependencies = [
     "pypdf>=4.0",
     "beautifulsoup4>=4.12",
     "lxml>=5.0",
+    "ebooklib>=0.18",
 ]
 
 [project.optional-dependencies]

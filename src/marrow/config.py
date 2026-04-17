@@ -61,24 +61,31 @@ class ModelRoute(BaseModel):
 
 
 class ModelsConfig(BaseModel):
+    classify: ModelRoute = Field(
+        default_factory=lambda: ModelRoute(
+            provider="gemini",
+            model_id="gemini-flash-lite-latest",
+            api_key_env="GEMINI_API_KEY",
+        )
+    )
     spine: ModelRoute = Field(
         default_factory=lambda: ModelRoute(
             provider="gemini",
-            model_id="gemini-3-flash-preview",
+            model_id="gemini-flash-latest",
             api_key_env="GEMINI_API_KEY",
         )
     )
     distill: ModelRoute = Field(
         default_factory=lambda: ModelRoute(
             provider="gemini",
-            model_id="gemini-3-flash-preview",
+            model_id="gemini-flash-latest",
             api_key_env="GEMINI_API_KEY",
         )
     )
     coherence: ModelRoute = Field(
         default_factory=lambda: ModelRoute(
             provider="gemini",
-            model_id="gemini-3-flash-preview",
+            model_id="gemini-flash-latest",
             api_key_env="GEMINI_API_KEY",
         )
     )

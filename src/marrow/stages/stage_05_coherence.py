@@ -212,6 +212,11 @@ def _fix_chapter(
 # ---- Phase D: Output assembly ----
 
 
+def _strip_citations(text: str) -> str:
+    """Remove all [p:uuid, ...] citation markers from text."""
+    return re.sub(r"\s*\[p:[a-f0-9-]+(?:,\s*p:[a-f0-9-]+)*\]", "", text)
+
+
 def _render_distillation_md(
     distillation: Distillation,
     doc: CanonicalDocument,
@@ -242,6 +247,154 @@ def _render_distillation_md(
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_epub(
+    distillation: Distillation,
+    spine: Spine,
+    doc: CanonicalDocument,
+    out_path: Path,
+) -> None:
+    """Render the distillation as a clean, readable EPUB."""
+    from ebooklib import epub
+
+    book = epub.EpubBook()
+    book.set_identifier(f"marrow-{doc.book_slug}")
+    book.set_title(doc.book_title)
+    book.set_language("en")
+    if doc.book_author:
+        book.add_author(doc.book_author)
+    book.add_metadata("DC", "description",
+                       f"Distilled from \"{doc.book_title}\" — "
+                       f"{distillation.total_word_count} words, "
+                       f"~{distillation.total_word_count // 275} pages.")
+
+    # CSS
+    css = epub.EpubItem(
+        uid="style",
+        file_name="style/default.css",
+        media_type="text/css",
+        content=b"""
+body { font-family: Georgia, 'Times New Roman', serif; line-height: 1.6; margin: 2em; color: #222; }
+h1 { font-size: 1.8em; margin-bottom: 0.3em; }
+h2 { font-size: 1.4em; margin-top: 2em; margin-bottom: 0.5em; border-bottom: 1px solid #ccc; padding-bottom: 0.3em; }
+h3 { font-size: 1.1em; margin-top: 1.5em; }
+p { margin-bottom: 0.8em; text-align: justify; }
+.meta { color: #666; font-style: italic; font-size: 0.9em; margin-bottom: 2em; }
+.spine-item { margin-bottom: 0.3em; }
+.spine-label { font-weight: bold; }
+blockquote { border-left: 3px solid #ccc; padding-left: 1em; color: #555; margin: 1em 0; }
+ol { padding-left: 1.5em; }
+li { margin-bottom: 0.3em; }
+hr { border: none; border-top: 1px solid #ddd; margin: 2em 0; }
+""",
+    )
+    book.add_item(css)
+
+    epub_chapters: list[epub.EpubHtml] = []
+    toc: list[epub.Link | tuple] = []
+
+    # Title page
+    title_html = f"""<html><body>
+<h1>{doc.book_title}</h1>
+<p class="meta">{"by " + doc.book_author if doc.book_author else ""}</p>
+<hr/>
+<p class="meta">Distilled by Marrow &mdash; {distillation.total_word_count:,} words,
+~{distillation.total_word_count // 275} pages.<br/>
+Original: {doc.word_count:,} words, ~{doc.page_count} pages.<br/>
+Generated {datetime.now(UTC).strftime('%Y-%m-%d')}.</p>
+</body></html>"""
+    title_page = epub.EpubHtml(title="Title", file_name="title.xhtml", lang="en")
+    title_page.content = title_html.encode("utf-8")
+    title_page.add_item(css)
+    book.add_item(title_page)
+    epub_chapters.append(title_page)
+
+    # Distillation chapters
+    for i, cd in enumerate(distillation.chapters, 1):
+        clean_body = _strip_citations(cd.body_md)
+        # Convert markdown paragraphs to HTML
+        paragraphs = clean_body.split("\n\n")
+        body_html = ""
+        for para in paragraphs:
+            para = para.strip()
+            if not para:
+                continue
+            if para.startswith("## "):
+                body_html += f"<h2>{para[3:]}</h2>\n"
+            elif para.startswith("### "):
+                body_html += f"<h3>{para[4:]}</h3>\n"
+            elif para.startswith("# "):
+                body_html += f"<h2>{para[2:]}</h2>\n"
+            else:
+                # Handle bold and italic markdown
+                para = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", para)
+                para = re.sub(r"\*(.+?)\*", r"<em>\1</em>", para)
+                body_html += f"<p>{para}</p>\n"
+
+        chapter_title = cd.chapter_title
+        ch = epub.EpubHtml(
+            title=chapter_title,
+            file_name=f"chapter_{i:02d}.xhtml",
+            lang="en",
+        )
+        ch.content = f"<html><body><h2>{chapter_title}</h2>\n{body_html}</body></html>".encode("utf-8")
+        ch.add_item(css)
+        book.add_item(ch)
+        epub_chapters.append(ch)
+        toc.append(epub.Link(f"chapter_{i:02d}.xhtml", chapter_title, f"ch{i}"))
+
+    # Spine appendix
+    spine_html = "<html><body><h1>Spine &mdash; Structural Skeleton</h1>\n"
+    for cs in spine.chapters:
+        spine_html += f"<h2>{cs.chapter_title}</h2>\n"
+        spine_html += f"<p><strong>Thesis:</strong> {cs.thesis}</p>\n"
+
+        if cs.frameworks:
+            spine_html += "<h3>Frameworks</h3>\n<ul>\n"
+            for f in cs.frameworks:
+                spine_html += f"<li><span class='spine-label'>{f.name}:</span> {f.description}</li>\n"
+            spine_html += "</ul>\n"
+
+        if cs.key_examples:
+            spine_html += "<h3>Key Examples</h3>\n<ul>\n"
+            for e in cs.key_examples:
+                spine_html += f"<li><span class='spine-label'>{e.label}:</span> {e.gist}</li>\n"
+            spine_html += "</ul>\n"
+
+        if cs.argumentative_moves:
+            spine_html += "<h3>Argument Flow</h3>\n<ol>\n"
+            for move in cs.argumentative_moves:
+                spine_html += f"<li>{move}</li>\n"
+            spine_html += "</ol>\n"
+
+        if cs.key_terms:
+            spine_html += "<h3>Key Terms</h3>\n<ul>\n"
+            for t in cs.key_terms:
+                spine_html += f"<li><span class='spine-label'>{t.term}:</span> {t.definition}</li>\n"
+            spine_html += "</ul>\n"
+
+        spine_html += "<hr/>\n"
+    spine_html += "</body></html>"
+
+    spine_page = epub.EpubHtml(
+        title="Spine — Structural Skeleton",
+        file_name="spine.xhtml",
+        lang="en",
+    )
+    spine_page.content = spine_html.encode("utf-8")
+    spine_page.add_item(css)
+    book.add_item(spine_page)
+    epub_chapters.append(spine_page)
+    toc.append(epub.Link("spine.xhtml", "Spine — Structural Skeleton", "spine"))
+
+    # Build TOC and spine
+    book.toc = toc
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    book.spine = ["nav"] + epub_chapters
+
+    epub.write_epub(str(out_path), book)
 
 
 def _render_spine_md(spine: Spine, doc: CanonicalDocument) -> str:
@@ -413,6 +566,15 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
     write_text(out_dir / f"{slug}.source.md", source_md)
     write_json(out_dir / "final_distillation.json", final_distillation)
 
+    # EPUB export
+    epub_path = out_dir / f"{slug}.epub"
+    try:
+        _render_epub(final_distillation, spine, doc, epub_path)
+        log.info("epub_exported", path=str(epub_path))
+    except Exception as e:
+        warnings.append(f"epub_export_failed: {e}")
+        log.warning("epub_export_failed", error=str(e))
+
     # Build manifest
     manifest = {
         "book_title": doc.book_title,
@@ -433,8 +595,10 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
     if config.export.vault:
         vault_dir = Path(config.export.vault) / "Marrow" / slug
         vault_dir.mkdir(parents=True, exist_ok=True)
-        for fname in [f"{slug}.md", f"{slug}.spine.md", f"{slug}.source.md"]:
-            shutil.copy2(out_dir / fname, vault_dir / fname)
+        for fname in [f"{slug}.md", f"{slug}.spine.md", f"{slug}.source.md", f"{slug}.epub"]:
+            src = out_dir / fname
+            if src.exists():
+                shutil.copy2(src, vault_dir / fname)
         log.info("exported_to_vault", vault=str(vault_dir))
 
     elapsed = perf_counter() - t0
