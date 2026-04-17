@@ -313,19 +313,23 @@ Generated {datetime.now(UTC).strftime('%Y-%m-%d')}.</p>
     # Distillation chapters
     for i, cd in enumerate(distillation.chapters, 1):
         clean_body = _strip_citations(cd.body_md)
-        # Convert markdown paragraphs to HTML
+        # Convert markdown paragraphs to HTML, stripping the leading heading
+        # (the distill prompt produces "## Chapter Title" which we handle via
+        # the EPUB chapter title — don't duplicate it)
         paragraphs = clean_body.split("\n\n")
         body_html = ""
+        first_heading_stripped = False
         for para in paragraphs:
             para = para.strip()
             if not para:
                 continue
-            if para.startswith("## "):
-                body_html += f"<h2>{para[3:]}</h2>\n"
-            elif para.startswith("### "):
+            if not first_heading_stripped and para.startswith(("#", "##")):
+                first_heading_stripped = True
+                continue  # skip — the EPUB chapter title handles this
+            if para.startswith("### "):
                 body_html += f"<h3>{para[4:]}</h3>\n"
-            elif para.startswith("# "):
-                body_html += f"<h2>{para[2:]}</h2>\n"
+            elif para.startswith("## "):
+                body_html += f"<h3>{para[3:]}</h3>\n"  # demote to h3 inside chapter
             else:
                 # Handle bold and italic markdown
                 para = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", para)

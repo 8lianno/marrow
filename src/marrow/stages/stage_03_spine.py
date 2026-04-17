@@ -38,6 +38,27 @@ def _section_word_count(section: SectionNode) -> int:
     return sum(len(p.text.split()) for p in _flatten_paragraphs(section))
 
 
+def _extract_spine(caller: LLMCaller, prompt: str, stage: str) -> ChapterSpine:
+    """Call the LLM without response_schema to avoid structured output truncation,
+    then parse the JSON manually."""
+    import json as _json
+
+    raw_text = caller.call(
+        stage=stage,
+        prompt=prompt,
+        model_role="spine",
+        max_tokens=16384,
+    )
+    # Strip code fences and parse
+    text = raw_text if isinstance(raw_text, str) else str(raw_text)
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.split("\n")
+        lines = [l for l in lines if not l.strip().startswith("```")]
+        text = "\n".join(lines).strip()
+    return ChapterSpine.model_validate_json(text)
+
+
 def run(working_dir: Path, config: MarrowConfig) -> StageResult:
     started = datetime.now(UTC)
     t0 = perf_counter()
@@ -89,15 +110,9 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
         )
 
         try:
-            spine_result = caller.call(
-                stage=STAGE_NAME,
-                prompt=prompt,
-                model_role="spine",
-                response_schema=ChapterSpine,
-                max_tokens=16384,
-            )
+            spine_result = _extract_spine(caller, prompt, STAGE_NAME)
         except Exception as first_err:
-            # Retry once with a shorter prompt — the model likely truncated
+            # Retry with shorter limits
             log.warning("chapter_spine_retrying", chapter=section.title)
             retry_prompt = (
                 prompt
@@ -106,13 +121,7 @@ def run(working_dir: Path, config: MarrowConfig) -> StageResult:
                 "Use 1 paragraph_id per item. Keep descriptions under 15 words."
             )
             try:
-                spine_result = caller.call(
-                    stage=STAGE_NAME,
-                    prompt=retry_prompt,
-                    model_role="spine",
-                    response_schema=ChapterSpine,
-                    max_tokens=16384,
-                )
+                spine_result = _extract_spine(caller, retry_prompt, STAGE_NAME)
             except Exception as retry_err:
                 log.warning(
                     "chapter_spine_failed",
