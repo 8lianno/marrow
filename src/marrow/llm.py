@@ -273,7 +273,7 @@ class LLMCaller:
             cmd.extend(["--output-schema", schema_path])
         cmd.append("-")  # read prompt from stdin
 
-        TIMEOUT_S = 1200
+        TIMEOUT_S = 3600  # 60 min — codex on dense chapters can take 15-20 min
         LOG_INTERVAL_S = 15
 
         try:
