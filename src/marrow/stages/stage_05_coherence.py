@@ -508,50 +508,6 @@ Generated {datetime.now(UTC).strftime('%Y-%m-%d')}.</p>
         epub_chapters.append(ch)
         toc.append(epub.Link(f"chapter_{i:02d}.xhtml", chapter_title, f"ch{i}"))
 
-    # Spine appendix
-    spine_html = "<html><body><h1>Spine &mdash; Structural Skeleton</h1>\n"
-    for cs in spine.chapters:
-        spine_html += f"<h2>{cs.chapter_title}</h2>\n"
-        spine_html += f"<p><strong>Thesis:</strong> {cs.thesis}</p>\n"
-
-        if cs.frameworks:
-            spine_html += "<h3>Frameworks</h3>\n<ul>\n"
-            for f in cs.frameworks:
-                spine_html += f"<li><span class='spine-label'>{f.name}:</span> {f.description}</li>\n"
-            spine_html += "</ul>\n"
-
-        if cs.key_examples:
-            spine_html += "<h3>Key Examples</h3>\n<ul>\n"
-            for e in cs.key_examples:
-                spine_html += f"<li><span class='spine-label'>{e.label}:</span> {e.gist}</li>\n"
-            spine_html += "</ul>\n"
-
-        if cs.argumentative_moves:
-            spine_html += "<h3>Argument Flow</h3>\n<ol>\n"
-            for move in cs.argumentative_moves:
-                spine_html += f"<li>{move}</li>\n"
-            spine_html += "</ol>\n"
-
-        if cs.key_terms:
-            spine_html += "<h3>Key Terms</h3>\n<ul>\n"
-            for t in cs.key_terms:
-                spine_html += f"<li><span class='spine-label'>{t.term}:</span> {t.definition}</li>\n"
-            spine_html += "</ul>\n"
-
-        spine_html += "<hr/>\n"
-    spine_html += "</body></html>"
-
-    spine_page = epub.EpubHtml(
-        title="Spine — Structural Skeleton",
-        file_name="spine.xhtml",
-        lang="en",
-    )
-    spine_page.content = spine_html.encode("utf-8")
-    spine_page.add_item(css)
-    book.add_item(spine_page)
-    epub_chapters.append(spine_page)
-    toc.append(epub.Link("spine.xhtml", "Spine — Structural Skeleton", "spine"))
-
     # Build TOC and spine
     book.toc = toc
     book.add_item(epub.EpubNcx())
