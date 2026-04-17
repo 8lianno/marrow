@@ -140,6 +140,10 @@ def run_pipeline(
         log.warning("force_wiping_working_dir", path=str(working_dir))
         shutil.rmtree(working_dir)
 
+    # Auto-resume: if working dir exists and --force wasn't passed, resume
+    if working_dir.exists() and not force:
+        resume = True
+
     working_dir.mkdir(parents=True, exist_ok=True)
 
     stages = discover_stages()
