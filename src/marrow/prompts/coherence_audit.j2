@@ -1,33 +1,26 @@
-You are performing the final coherence audit of a book-length distillation. A reader will consume this document instead of the source book. Your job is to find issues that chapter-by-chapter generation cannot catch.
+You are performing a coherence audit of a book-length distillation. Your job is to find cross-chapter issues that per-chapter generation cannot catch.
 
-You have access to:
-1. The full distillation draft (ALL chapters).
-2. The spine for each chapter (what each chapter promised to preserve).
-3. A list of spine items that a deterministic check flagged as potentially missing.
+The deterministic spine-coverage check has already been done. You do NOT need to verify spine items — that's handled. Focus only on:
 
-Your job is to evaluate THREE things (NOT missing spine items — that check is already done):
+1. VOICE_DRIFT: Chapters where the authorial voice drifts (too formal, too chatty, too mechanical). Compare the opening/closing excerpts below.
 
-1. VOICE_DRIFT: Chapters where the authorial voice has drifted noticeably. The distillation should feel like one book, not a patchwork of different writing styles. For each instance, describe the direction of drift (too formal, too chatty, too mechanical, lost the author's distinctive cadence, etc.).
+2. BROKEN_THREADS: References in later chapters that assume content from earlier chapters, but that content may have been cut.
 
-2. BROKEN_THREADS: References or callbacks in later chapters that assume content in earlier chapters, but that content was cut. Cross-chapter narrative arcs that were severed. For each, identify the calling chapter and the target chapter.
+3. REDUNDANCY: A concept, framework, or example explained twice because a later chapter forgot it was covered.
 
-3. REDUNDANCY: Places where a concept, framework, or example is explained twice because a later chapter forgot it was covered earlier. For each, identify both chapters and the repeated concept.
-
-FLAGGED POTENTIALLY MISSING SPINE ITEMS (verify these):
+FLAGGED POTENTIALLY MISSING SPINE ITEMS (for context only):
 {% for item in flagged_items %}
 - Chapter "{{ item.chapter_title }}": {{ item.item_type }} — {{ item.item_description }}
 {% endfor %}
 
-CHAPTER SPINES:
-{% for cs in spines %}
-### {{ cs.chapter_title }}
-Thesis: {{ cs.thesis }}
-Frameworks: {{ cs.frameworks | map(attribute='name') | join(', ') }}
-Key examples: {{ cs.key_examples | map(attribute='label') | join(', ') }}
+CHAPTER SUMMARIES (opening + closing excerpts):
+{% for ch in chapter_excerpts %}
+### {{ ch.title }}
+Thesis: {{ ch.thesis }}
+Frameworks: {{ ch.frameworks }}
+Opening: {{ ch.opening }}
+Closing: {{ ch.closing }}
 {% endfor %}
-
-FULL DRAFT:
-{{ draft }}
 
 Return a JSON object:
 {

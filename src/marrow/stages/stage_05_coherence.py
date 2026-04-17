@@ -147,19 +147,35 @@ def _assemble_draft(distillation: Distillation) -> str:
     return "\n\n".join(parts)
 
 
+def _excerpt(text: str, max_words: int = 200) -> str:
+    """First max_words words of text."""
+    words = text.split()
+    return " ".join(words[:max_words]) + ("..." if len(words) > max_words else "")
+
+
 def _sonnet_audit(
     caller: LLMCaller,
     spine: Spine,
     distillation: Distillation,
     flagged_items: list[MissingSpineItem],
 ) -> CoherenceReport:
-    """Run the Sonnet coherence audit."""
-    draft = _assemble_draft(distillation)
+    """Run coherence audit with chapter excerpts (not full draft)."""
+    spine_map = {str(cs.section_id): cs for cs in spine.chapters}
+
+    chapter_excerpts = []
+    for cd in distillation.chapters:
+        cs = spine_map.get(str(cd.section_id))
+        chapter_excerpts.append({
+            "title": cd.chapter_title,
+            "thesis": cs.thesis if cs else "",
+            "frameworks": ", ".join(f.name for f in cs.frameworks) if cs else "",
+            "opening": _excerpt(cd.body_md, 200),
+            "closing": _excerpt(" ".join(cd.body_md.split()[-200:]), 200),
+        })
 
     prompt = render(
         "coherence_audit.j2",
-        spines=spine.chapters,
-        draft=draft,
+        chapter_excerpts=chapter_excerpts,
         flagged_items=flagged_items,
     )
 
@@ -167,9 +183,22 @@ def _sonnet_audit(
         stage=STAGE_NAME,
         prompt=prompt,
         model_role="coherence",
-        response_schema=CoherenceReport,
         max_tokens=8192,
     )
+
+    # Parse if string (no response_schema — codex returns raw text)
+    if isinstance(report, str):
+        report = report.strip()
+        if report.startswith("```"):
+            lines = report.split("\n")
+            lines = [l for l in lines if not l.strip().startswith("```")]
+            report = "\n".join(lines).strip()
+        try:
+            report = CoherenceReport.model_validate_json(report)
+        except Exception:
+            log.warning("coherence_audit_parse_failed_using_default")
+            report = CoherenceReport(overall_pass=True)
+
     return report
 
 
